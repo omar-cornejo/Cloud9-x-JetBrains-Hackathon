@@ -4,9 +4,17 @@ interface TimerDisplayProps {
   timeLeft: number;
   currentTurn: number;
   draftSequence: DraftTurn[];
+  blueTeamName: string;
+  redTeamName: string;
 }
 
-export function TimerDisplay({ timeLeft, currentTurn, draftSequence }: TimerDisplayProps) {
+export function TimerDisplay({ 
+  timeLeft, 
+  currentTurn, 
+  draftSequence,
+  blueTeamName,
+  redTeamName 
+}: TimerDisplayProps) {
   const activeTurn = draftSequence[currentTurn];
   const isComplete = currentTurn >= draftSequence.length;
 
@@ -29,7 +37,7 @@ export function TimerDisplay({ timeLeft, currentTurn, draftSequence }: TimerDisp
                   : "text-[#e74c3c]"
               }
             >
-              {activeTurn.team}
+              {activeTurn.team === "blue" ? blueTeamName : redTeamName}
             </span>{" "}
             {activeTurn.type}
           </span>

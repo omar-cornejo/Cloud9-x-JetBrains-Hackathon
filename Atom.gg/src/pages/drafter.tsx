@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Champion } from "../types/draft";
+import { Champion, DraftConfig } from "../types/draft";
 import { DRAFT_SEQUENCE, NONE_CHAMPION } from "../constants/draft";
 import { BanSlot } from "../components/BanSlot";
 import { PickSlot } from "../components/PickSlot";
@@ -8,47 +8,39 @@ import { ChampionCard } from "../components/ChampionCard";
 import { TimerDisplay } from "../components/TimerDisplay";
 import "./drafter.css";
 
-function Drafter() {
+interface DrafterProps {
+  config: DraftConfig;
+  onBack: () => void;
+}
+
+function Drafter({ config, onBack }: DrafterProps) {
   const [champions, setChampions] = useState<Champion[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [blueBans, setBlueBans] = useState<(Champion | null)[]>([
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
-  const [redBans, setRedBans] = useState<(Champion | null)[]>([
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
-  const [bluePicks, setBluePicks] = useState<(Champion | null)[]>([
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
-  const [redPicks, setRedPicks] = useState<(Champion | null)[]>([
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
+  const [stagedChampion, setStagedChampion] = useState<Champion | null>(null);
+  const [gameNumber, setGameNumber] = useState(1);
+  const [globalLockedChampions, setGlobalLockedChampions] = useState<Set<string>>(new Set());
+
+  const [blueBans, setBlueBans] = useState<(Champion | null)[]>(Array(5).fill(null));
+  const [redBans, setRedBans] = useState<(Champion | null)[]>(Array(5).fill(null));
+  const [bluePicks, setBluePicks] = useState<(Champion | null)[]>(Array(5).fill(null));
+  const [redPicks, setRedPicks] = useState<(Champion | null)[]>(Array(5).fill(null));
+
   const [currentTurn, setCurrentTurn] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
 
-  const selectedNames = useMemo(() => {
+  const currentDraftSelectedNames = useMemo(() => {
     return new Set(
       [...blueBans, ...redBans, ...bluePicks, ...redPicks]
         .filter((c) => c !== null && c.name !== "none")
         .map((c) => c!.name)
     );
   }, [blueBans, redBans, bluePicks, redPicks]);
+
+  const allLockedNames = useMemo(() => {
+    const combined = new Set(globalLockedChampions);
+    currentDraftSelectedNames.forEach((name) => combined.add(name));
+    return combined;
+  }, [globalLockedChampions, currentDraftSelectedNames]);
 
   useEffect(() => {
     invoke<Champion[]>("get_all_champions")
@@ -81,45 +73,74 @@ function Drafter() {
     return () => clearInterval(interval);
   }, [currentTurn]);
 
-  const handleSelectChampion = useCallback((champion: Champion) => {
-    if (currentTurn >= DRAFT_SEQUENCE.length) return;
-    if (champion.name !== "none" && selectedNames.has(champion.name)) return;
+  const handleSelectChampion = useCallback(
+    (champion: Champion) => {
+      if (currentTurn >= DRAFT_SEQUENCE.length) return;
+      if (champion.name !== "none" && allLockedNames.has(champion.name)) return;
 
-    const turn = DRAFT_SEQUENCE[currentTurn];
-    const isBlue = turn.team === "blue";
-    const isBan = turn.type === "ban";
+      const turn = DRAFT_SEQUENCE[currentTurn];
+      const isBlue = turn.team === "blue";
+      const isBan = turn.type === "ban";
 
-    if (isBlue) {
-      if (isBan) {
-        setBlueBans((prev) => {
-          const next = [...prev];
-          next[turn.index] = champion;
-          return next;
-        });
+      if (isBlue) {
+        if (isBan) {
+          setBlueBans((prev) => {
+            const next = [...prev];
+            next[turn.index] = champion;
+            return next;
+          });
+        } else {
+          setBluePicks((prev) => {
+            const next = [...prev];
+            next[turn.index] = champion;
+            return next;
+          });
+        }
       } else {
-        setBluePicks((prev) => {
-          const next = [...prev];
-          next[turn.index] = champion;
-          return next;
-        });
+        if (isBan) {
+          setRedBans((prev) => {
+            const next = [...prev];
+            next[turn.index] = champion;
+            return next;
+          });
+        } else {
+          setRedPicks((prev) => {
+            const next = [...prev];
+            next[turn.index] = champion;
+            return next;
+          });
+        }
       }
-    } else {
-      if (isBan) {
-        setRedBans((prev) => {
-          const next = [...prev];
-          next[turn.index] = champion;
-          return next;
-        });
-      } else {
-        setRedPicks((prev) => {
-          const next = [...prev];
-          next[turn.index] = champion;
-          return next;
-        });
-      }
+      setCurrentTurn((prev) => prev + 1);
+      setStagedChampion(null);
+    },
+    [currentTurn, allLockedNames]
+  );
+
+  const handleNextGame = () => {
+    const newLocked = new Set(globalLockedChampions);
+
+    if (config.mode === "Fearless") {
+      [...bluePicks, ...redPicks].forEach((c) => {
+        if (c && c.name !== "none") newLocked.add(c.name);
+      });
+    } else if (config.mode === "Ironman") {
+      [...blueBans, ...redBans, ...bluePicks, ...redPicks].forEach((c) => {
+        if (c && c.name !== "none") newLocked.add(c.name);
+      });
     }
-    setCurrentTurn((prev) => prev + 1);
-  }, [currentTurn, selectedNames]);
+
+    setGlobalLockedChampions(newLocked);
+    setGameNumber((prev) => prev + 1);
+
+    setBlueBans(Array(5).fill(null));
+    setRedBans(Array(5).fill(null));
+    setBluePicks(Array(5).fill(null));
+    setRedPicks(Array(5).fill(null));
+    setCurrentTurn(0);
+    setTimeLeft(30);
+    setSearchTerm("");
+  };
 
   const filteredChampions = useMemo(() => {
     const filtered = [...champions]
@@ -134,15 +155,117 @@ function Drafter() {
     return filtered;
   }, [champions, searchTerm]);
 
+  const isDraftComplete = currentTurn >= DRAFT_SEQUENCE.length;
+  const hasMoreGames = gameNumber < config.numGames;
+
+  const effectiveBlueBans = useMemo(() => {
+    if (!stagedChampion || isDraftComplete) return blueBans;
+    const turn = DRAFT_SEQUENCE[currentTurn];
+    if (turn.team === "blue" && turn.type === "ban") {
+      const next = [...blueBans];
+      next[turn.index] = stagedChampion;
+      return next;
+    }
+    return blueBans;
+  }, [blueBans, stagedChampion, currentTurn, isDraftComplete]);
+
+  const effectiveRedBans = useMemo(() => {
+    if (!stagedChampion || isDraftComplete) return redBans;
+    const turn = DRAFT_SEQUENCE[currentTurn];
+    if (turn.team === "red" && turn.type === "ban") {
+      const next = [...redBans];
+      next[turn.index] = stagedChampion;
+      return next;
+    }
+    return redBans;
+  }, [redBans, stagedChampion, currentTurn, isDraftComplete]);
+
+  const effectiveBluePicks = useMemo(() => {
+    if (!stagedChampion || isDraftComplete) return bluePicks;
+    const turn = DRAFT_SEQUENCE[currentTurn];
+    if (turn.team === "blue" && turn.type === "pick") {
+      const next = [...bluePicks];
+      next[turn.index] = stagedChampion;
+      return next;
+    }
+    return bluePicks;
+  }, [bluePicks, stagedChampion, currentTurn, isDraftComplete]);
+
+  const effectiveRedPicks = useMemo(() => {
+    if (!stagedChampion || isDraftComplete) return redPicks;
+    const turn = DRAFT_SEQUENCE[currentTurn];
+    if (turn.team === "red" && turn.type === "pick") {
+      const next = [...redPicks];
+      next[turn.index] = stagedChampion;
+      return next;
+    }
+    return redPicks;
+  }, [redPicks, stagedChampion, currentTurn, isDraftComplete]);
+
   return (
-    <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border">
+    <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
+      <button
+        onClick={onBack}
+        className="absolute top-5 left-5 z-20 flex items-center gap-2 px-4 py-2 bg-[#1a1a1a] border border-[#333] rounded-lg text-xs font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4 transform group-hover:-translate-x-1 transition-transform"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M15 19l-7-7 7-7"
+          />
+        </svg>
+        Back
+      </button>
+
+      <div className="absolute top-5 left-1/2 -translate-x-1/2 text-[#3498db] font-black uppercase tracking-[0.2em] bg-[#1a1a1a] px-6 py-1.5 border-2 border-[#333] rounded-full text-xs shadow-xl z-10">
+        Game {gameNumber} / {config.numGames} <span className="mx-2 text-[#444]">|</span> {config.mode} Mode
+      </div>
+
+      {isDraftComplete && (
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 animate-in fade-in duration-300">
+          <div className="bg-[#1a1a1a] p-12 border-2 border-[#3498db] rounded-2xl flex flex-col items-center gap-8 shadow-[0_0_50px_rgba(52,152,219,0.2)]">
+            <div className="flex flex-col items-center gap-2">
+              <h2 className="text-4xl font-black uppercase tracking-[0.1em]">Draft Complete</h2>
+              <div className="h-1 w-20 bg-[#3498db] rounded-full" />
+            </div>
+            
+            {hasMoreGames ? (
+              <button
+                onClick={handleNextGame}
+                className="group relative bg-[#3498db] hover:bg-[#2980b9] text-white px-12 py-5 font-black uppercase tracking-[0.2em] rounded-lg transition-all transform hover:scale-105 active:scale-95"
+              >
+                Next Draft
+              </button>
+            ) : (
+              <div className="flex flex-col items-center gap-6">
+                <p className="text-[#666] uppercase tracking-[0.3em] font-bold text-sm">Series Finished</p>
+                <button
+                  onClick={onBack}
+                  className="bg-[#3498db] hover:bg-[#2980b9] text-white px-12 py-5 font-black uppercase tracking-[0.2em] rounded-lg transition-all"
+                >
+                  Back to Setup
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-start mb-8">
         <div className="flex flex-col gap-2">
-          <div className="text-lg font-bold uppercase tracking-widest">
-            Blue team bans
+          <div className="text-lg font-bold uppercase tracking-widest text-[#3498db]">
+            {config.team1} <span className="text-[#666]">bans</span>
           </div>
           <div className="flex gap-1.5">
-            {blueBans.map((ban, i) => (
+            {effectiveBlueBans.map((ban, i) => (
               <BanSlot key={i} ban={ban} />
             ))}
           </div>
@@ -152,14 +275,16 @@ function Drafter() {
           timeLeft={timeLeft}
           currentTurn={currentTurn}
           draftSequence={DRAFT_SEQUENCE}
+          blueTeamName={config.team1}
+          redTeamName={config.team2}
         />
 
         <div className="flex flex-col gap-2">
-          <div className="text-lg font-bold uppercase tracking-widest text-right">
-            Red team bans
+          <div className="text-lg font-bold uppercase tracking-widest text-right text-[#e74c3c]">
+            {config.team2} <span className="text-[#666]">bans</span>
           </div>
           <div className="flex gap-1.5">
-            {redBans.map((ban, i) => (
+            {effectiveRedBans.map((ban, i) => (
               <BanSlot key={i} ban={ban} />
             ))}
           </div>
@@ -168,42 +293,54 @@ function Drafter() {
 
       <div className="flex flex-1 justify-between gap-8 min-h-0">
         <div className="flex flex-col gap-5 w-[220px]">
-          {bluePicks.map((pick, i) => (
+          {effectiveBluePicks.map((pick, i) => (
             <PickSlot key={i} pick={pick} index={i} team="blue" />
           ))}
         </div>
 
         <div className="flex-1 flex flex-col gap-5 min-w-0">
-          <div className="flex justify-end">
+          <div className="flex flex-col items-end gap-3">
             <input
               type="text"
               placeholder="Search champion..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-[200px] h-[35px] border border-[#444] bg-[#252525] px-3 text-sm focus:outline-none focus:border-[#3498db] transition-colors"
+              className="w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest"
             />
+            <button
+              onClick={() => stagedChampion && handleSelectChampion(stagedChampion)}
+              disabled={!stagedChampion}
+              className={`w-[200px] py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
+                stagedChampion 
+                  ? "bg-[#3498db] hover:bg-[#2980b9] text-white shadow-[0_0_20px_rgba(52,152,219,0.3)]" 
+                  : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
+              }`}
+            >
+              Confirm
+            </button>
           </div>
-          <div className="flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar">
+          <div className="flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner">
             <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
               {filteredChampions.map((champ) => (
                 <ChampionCard
                   key={champ.id}
                   champion={champ}
-                  isSelected={selectedNames.has(champ.name)}
-                  onSelect={handleSelectChampion}
+                  isSelected={allLockedNames.has(champ.name)}
+                  isStaged={stagedChampion?.name === champ.name}
+                  onSelect={(c) => setStagedChampion(prev => prev?.name === c.name ? null : c)}
                 />
               ))}
             </div>
           </div>
-          <div className="flex-1 border-2 border-[#333] bg-[#1a1a1a] flex items-center justify-center">
-            <div className="text-[#666] text-2xl font-bold text-center uppercase tracking-[2px]">
-              champion recommendations
+          <div className="flex-1 border-2 border-[#333] bg-[#1a1a1a] flex items-center justify-center rounded-lg">
+            <div className="text-[#333] text-2xl font-black text-center uppercase tracking-[0.3em]">
+              Recommendations
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-5 w-[220px]">
-          {redPicks.map((pick, i) => (
+          {effectiveRedPicks.map((pick, i) => (
             <PickSlot key={i} pick={pick} index={i} team="red" />
           ))}
         </div>
