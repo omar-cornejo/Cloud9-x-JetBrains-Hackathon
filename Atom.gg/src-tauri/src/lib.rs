@@ -57,11 +57,53 @@ fn get_champion_splash(id: String) -> String {
     format!("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{}_0.jpg", id)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TeamPlayers {
+    pub team: String,
+    pub top: String,
+    pub jungle: String,
+    pub mid: String,
+    pub adc: String,
+    pub utility: String,
+}
+
+#[tauri::command]
+fn get_team_players(team_name: String) -> Result<TeamPlayers, String> {
+    let db_path = "src/esports_data.db";
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+
+    let views = ["view_lck", "view_lpl", "view_lcs", "view_lec"];
+
+    for view in views {
+        let query = format!("SELECT team, top, jungle, mid, adc, utility FROM {} WHERE team = ?1 COLLATE NOCASE", view);
+        let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+        let mut rows = stmt.query([&team_name]).map_err(|e| e.to_string())?;
+
+        if let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            return Ok(TeamPlayers {
+                team: row.get(0).map_err(|e| e.to_string())?,
+                top: row.get(1).map_err(|e| e.to_string())?,
+                jungle: row.get(2).map_err(|e| e.to_string())?,
+                mid: row.get(3).map_err(|e| e.to_string())?,
+                adc: row.get(4).map_err(|e| e.to_string())?,
+                utility: row.get(5).map_err(|e| e.to_string())?,
+            });
+        }
+    }
+
+    Err(format!("Team {} not found in any league", team_name))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_all_champions, get_champion_icon, get_champion_splash])
+        .invoke_handler(tauri::generate_handler![
+            get_all_champions, 
+            get_champion_icon, 
+            get_champion_splash,
+            get_team_players
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

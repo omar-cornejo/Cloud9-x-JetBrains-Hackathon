@@ -16,6 +16,16 @@ export type GameMode = "Normal" | "Fearless" | "Ironman";
 export interface DraftConfig {
   team1: string;
   team2: string;
+  isTeam1Blue: boolean;
   mode: GameMode;
   numGames: number;
+}
+
+export interface TeamPlayers {
+  team: string;
+  top: string;
+  jungle: string;
+  mid: string;
+  adc: string;
+  utility: string;
 }
