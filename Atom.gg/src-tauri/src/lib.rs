@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod lcu;
+
 const DDRAGON_VERSION: &str = "16.1.1";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -102,7 +104,8 @@ pub fn run() {
             get_all_champions, 
             get_champion_icon, 
             get_champion_splash,
-            get_team_players
+            get_team_players,
+            lcu::get_current_summoner
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

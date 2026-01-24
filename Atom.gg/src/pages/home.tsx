@@ -29,17 +29,18 @@ export function Home({ onSelectMode }: HomeProps) {
         </button>
 
         <button
-          disabled
-          className="group relative bg-[#1a1a1a]/50 border-2 border-[#222] p-8 rounded-2xl cursor-not-allowed opacity-50"
+          onClick={() => onSelectMode("client")}
+          className="group relative bg-[#1a1a1a] hover:bg-[#3498db] border-2 border-[#333] hover:border-[#3498db] p-8 rounded-2xl transition-all duration-300 transform hover:scale-[1.05] active:scale-[0.98] shadow-xl overflow-hidden"
         >
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-2xl font-black uppercase tracking-widest text-[#444]">
+          <div className="relative z-10 flex flex-col items-center gap-2">
+            <span className="text-2xl font-black uppercase tracking-widest group-hover:text-white transition-colors">
               Client Draft
             </span>
-            <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#444]">
-              Coming Soon
+            <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#666] group-hover:text-white/70 transition-colors">
+              LCU Integration
             </span>
           </div>
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] transition-transform" />
         </button>
       </div>
 
