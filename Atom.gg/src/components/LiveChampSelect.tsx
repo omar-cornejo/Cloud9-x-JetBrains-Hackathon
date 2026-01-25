@@ -345,15 +345,10 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                   placeholder="Search champion..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  disabled={!currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"}
-                  className={`w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest ${
-                      !currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION" ? "opacity-50 cursor-not-allowed" : ""
-                  }`}
+                  className={`w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest`}
               />
             </div>
-            <div className={`flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner ${
-                !currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION" ? "opacity-50 pointer-events-none" : ""
-            }`}>
+            <div className={`flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner `}>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
                 {filteredChampions.map((champ) => (
                     <ChampionCard
