@@ -216,7 +216,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     const phase = currentAction.phase;
 
     if (phase === "PLANNING") {
-      return "Declare Your Intent";
+      return "Prepare your champion";
     }
 
     if (phase === "FINALIZATION") {
@@ -224,19 +224,19 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
 
     if (!currentAction.isMyTurn) {
-      if (currentAction.type === "ban") return "Enemy Banning";
-      if (currentAction.type === "pick") return "Enemy Picking";
+      if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Enemy Banning</span>;
+      if (currentAction.type === "pick") return <span className="text-[#3498db]">Enemy Picking</span>;
       return "Waiting...";
     }
 
-    if (currentAction.type === "ban") return "Ban a Champion";
-    if (currentAction.type === "pick") return "Pick a Champion";
+    if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Ban a Champion</span>;
+    if (currentAction.type === "pick") return <span className="text-[#3498db]">Pick a Champion</span>;
     return "Waiting...";
   };
 
   const getConfirmButtonText = () => {
-    if (currentAction.type === "ban") return "Ban";
-    if (currentAction.type === "pick") return "Lock In";
+    if (currentAction.type === "ban") return <span className="text-white">Ban</span>;
+    if (currentAction.type === "pick") return <span className="text-white">Lock In</span>;
     return "Confirm";
   };
 
@@ -256,7 +256,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         <div className="flex justify-between items-start mb-8">
           <div className="flex flex-col gap-2">
             <div className="text-lg font-bold uppercase tracking-widest text-[#3498db]">
-              Blue Side <span className="text-[#666]">bans</span>
+              Blue Side <span className="text-[#e74c3c]">bans</span>
             </div>
             <div className="flex gap-1.5">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
@@ -309,7 +309,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
           <div className="flex flex-col gap-2">
             <div className="text-lg font-bold uppercase tracking-widest text-right text-[#e74c3c]">
-              Red Side <span className="text-[#666]">bans</span>
+              Red Side <span className="text-[#e74c3c]">bans</span>
             </div>
             <div className="flex gap-1.5">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
@@ -378,7 +378,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             {theirTeam.map((player: any, i: number) => (
                 <PickSlot
                     key={i}
-                    pick={getChamp(player.championId)}
+                    pick={getChamp(player.championId || player.championPickIntent)}
                     index={i}
                     team="red"
                     playerName={`Enemy ${i + 1}`}

@@ -41,7 +41,7 @@ export function PickSlot({ pick, index, team, playerName }: PickSlotProps) {
               {playerName}
             </span>
           )}
-          <span className="text-[#444] uppercase text-xs tracking-widest font-bold">
+          <span className="text-[#3498db] uppercase text-xs tracking-widest font-bold">
             champ {index + 1}
           </span>
         </div>
