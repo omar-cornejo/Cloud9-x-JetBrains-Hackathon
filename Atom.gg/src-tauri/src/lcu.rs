@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 
-use crate::lcu_utils::{get_lcu_client, find_local_player_pick_action, find_local_player_ban_action};
+use crate::lcu_utils::{get_lcu_client, find_local_player_pick_action, find_local_player_ban_action, find_lockfile};
+
+#[tauri::command]
+pub fn is_lcu_available() -> bool {
+    find_lockfile().is_some()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Summoner {

@@ -111,7 +111,8 @@ pub fn run() {
             lcu::hover_champion,
             lcu::lock_champion,
             lcu::hover_ban,
-            lcu::lock_ban
+            lcu::lock_ban,
+            lcu::is_lcu_available
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
