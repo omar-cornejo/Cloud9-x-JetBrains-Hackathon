@@ -1,59 +1,7 @@
-use std::path::PathBuf;
-use std::fs;
-use sysinfo::{ProcessExt, System, SystemExt};
-use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use rand::Rng;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct LcuInfo {
-    pub port: String,
-    pub password: String,
-    pub auth_header: String,
-}
-
-pub fn find_lockfile() -> Option<PathBuf> {
-    //default path, if not check process?
-    let default_path = PathBuf::from(r"C:\Riot Games\League of Legends\lockfile");
-    if default_path.exists() {
-        return Some(default_path);
-    }
-
-    let mut sys = System::new_all();
-    sys.refresh_processes();
-
-    for process in sys.processes().values() {
-        if process.name() == "LeagueClient.exe" {
-            if let Some(parent) = process.exe().parent() {
-                let lockfile_path = parent.join("lockfile");
-                if lockfile_path.exists() {
-                    return Some(lockfile_path);
-                }
-            }
-        }
-    }
-
-    None
-}
-
-pub fn parse_lockfile(path: PathBuf) -> Option<LcuInfo> {
-    let contents = fs::read_to_string(path).ok()?;
-    let parts: Vec<&str> = contents.split(':').collect();
-
-    if parts.len() >= 5 {
-        let port = parts[2].to_string();
-        let password = parts[3].to_string();
-        let auth = format!("riot:{}", password);
-        let auth_header = format!("Basic {}", general_purpose::STANDARD.encode(auth));
-
-        Some(LcuInfo {
-            port,
-            password,
-            auth_header,
-        })
-    } else {
-        None
-    }
-}
+use crate::lcu_utils::{get_lcu_client, find_local_player_pick_action, find_local_player_ban_action};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Summoner {
@@ -72,15 +20,28 @@ pub struct Summoner {
     pub tag_line: String,
 }
 
+// Hardcoded list of popular champions for POC
+const CHAMPION_IDS: &[i32] = &[
+    1,   // Annie
+    51,  // Caitlyn
+    53,  // Blitzcrank
+    64,  // Lee Sin
+    89,  // Leona
+    92,  // Riven
+    103, // Ahri
+    157, // Yasuo
+    202, // Jhin
+    221, // Zeri
+    238, // Zed
+    350, // Yuumi
+    555, // Pyke
+    777, // Yone
+    876, // Lillia
+];
+
 #[tauri::command]
 pub async fn get_current_summoner() -> Result<Summoner, String> {
-    let lockfile_path = find_lockfile().ok_or("League of Legends lockfile not found. Is the client running?")?;
-    let lcu_info = parse_lockfile(lockfile_path).ok_or("Failed to parse lockfile")?;
-
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true) //NEEDED for all LCU endpoints!!!!
-        .build()
-        .map_err(|e| e.to_string())?;
+    let (client, lcu_info) = get_lcu_client()?;
 
     let url = format!("https://127.0.0.1:{}/lol-summoner/v1/current-summoner", lcu_info.port);
 
@@ -95,5 +56,143 @@ pub async fn get_current_summoner() -> Result<Summoner, String> {
         Ok(summoner)
     } else {
         Err(format!("LCU error: {}", response.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn get_random_champion() -> Result<i32, String> {
+    let mut rng = rand::thread_rng();
+    let index = rng.gen_range(0..CHAMPION_IDS.len());
+    Ok(CHAMPION_IDS[index])
+}
+
+#[tauri::command]
+pub async fn hover_champion(champion_id: i32) -> Result<String, String> {
+    let (client, lcu_info) = get_lcu_client()?;
+
+    let (action_id, _) = find_local_player_pick_action(&client, &lcu_info).await?;
+
+    let patch_url = format!(
+        "https://127.0.0.1:{}/lol-champ-select/v1/session/actions/{}",
+        lcu_info.port, action_id
+    );
+
+    let body = serde_json::json!({
+        "championId": champion_id
+    });
+
+    let response = client
+        .patch(&patch_url)
+        .header("Authorization", &lcu_info.auth_header)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok(format!("Hovered champion ID: {}", champion_id))
+    } else {
+        Err(format!("Failed to hover champion: {}", response.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn lock_champion() -> Result<String, String> {
+    let (client, lcu_info) = get_lcu_client()?;
+
+    let (action_id, champion_id) = find_local_player_pick_action(&client, &lcu_info).await?;
+
+    let champion_id = champion_id.ok_or("No champion selected to lock")?;
+
+    // Use PATCH instead of POST and include the completed flag in the body
+    let patch_url = format!(
+        "https://127.0.0.1:{}/lol-champ-select/v1/session/actions/{}",
+        lcu_info.port, action_id
+    );
+
+    let body = serde_json::json!({
+        "completed": true,
+        "championId": champion_id
+    });
+
+    let response = client
+        .patch(&patch_url)
+        .header("Authorization", &lcu_info.auth_header)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok(format!("Locked champion ID: {}", champion_id))
+    } else {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        Err(format!("Failed to lock champion: {} - {}", status, error_text))
+    }
+}
+
+#[tauri::command]
+pub async fn hover_ban(champion_id: i32) -> Result<String, String> {
+    let (client, lcu_info) = get_lcu_client()?;
+
+    let (action_id, _) = find_local_player_ban_action(&client, &lcu_info).await?;
+
+    let patch_url = format!(
+        "https://127.0.0.1:{}/lol-champ-select/v1/session/actions/{}",
+        lcu_info.port, action_id
+    );
+
+    let body = serde_json::json!({
+        "championId": champion_id
+    });
+
+    let response = client
+        .patch(&patch_url)
+        .header("Authorization", &lcu_info.auth_header)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok(format!("Hovered ban for champion ID: {}", champion_id))
+    } else {
+        Err(format!("Failed to hover ban: {}", response.status()))
+    }
+}
+
+#[tauri::command]
+pub async fn lock_ban() -> Result<String, String> {
+    let (client, lcu_info) = get_lcu_client()?;
+
+    let (action_id, champion_id) = find_local_player_ban_action(&client, &lcu_info).await?;
+
+    let champion_id = champion_id.ok_or("No champion selected to ban")?;
+
+    let patch_url = format!(
+        "https://127.0.0.1:{}/lol-champ-select/v1/session/actions/{}",
+        lcu_info.port, action_id
+    );
+
+    let body = serde_json::json!({
+        "completed": true,
+        "championId": champion_id
+    });
+
+    let response = client
+        .patch(&patch_url)
+        .header("Authorization", &lcu_info.auth_header)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if response.status().is_success() {
+        Ok(format!("Locked ban for champion ID: {}", champion_id))
+    } else {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        Err(format!("Failed to lock ban: {} - {}", status, error_text))
     }
 }
