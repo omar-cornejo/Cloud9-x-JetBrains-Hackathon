@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use rand::Rng;
 
 use crate::lcu_utils::{get_lcu_client, find_local_player_pick_action, find_local_player_ban_action, find_lockfile};
@@ -200,4 +201,10 @@ pub async fn lock_ban() -> Result<String, String> {
         let error_text = response.text().await.unwrap_or_default();
         Err(format!("Failed to lock ban: {} - {}", status, error_text))
     }
+}
+
+#[tauri::command]
+pub async fn get_champ_select_session() -> Result<Value, String> {
+    let (client, lcu_info) = get_lcu_client()?;
+    crate::lcu_utils::get_champ_select_session(&client, &lcu_info).await
 }

@@ -1,6 +1,7 @@
 export interface Champion {
   name: string;
   id: string;
+  numeric_id: number;
   icon: string;
   splash: string;
 }

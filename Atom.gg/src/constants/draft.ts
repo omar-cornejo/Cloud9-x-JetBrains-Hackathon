@@ -30,6 +30,7 @@ export const DRAFT_SEQUENCE: DraftTurn[] = [
 export const NONE_CHAMPION: Champion = {
   name: "none",
   id: "none",
+  numeric_id: 0,
   icon: "/none.png",
   splash: "/none.png",
 };

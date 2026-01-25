@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { LiveChampSelect } from "../components/LiveChampSelect";
 
 interface Summoner {
   accountId: number;
@@ -26,6 +27,27 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
   const [hoverBanLoading, setHoverBanLoading] = useState(false);
   const [lockBanLoading, setLockBanLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [hasLiveSession, setHasLiveSession] = useState(false);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        await invoke("get_champ_select_session");
+        setHasLiveSession(true);
+      } catch {
+        setHasLiveSession(false);
+      }
+    };
+
+    checkSession();
+    const interval = setInterval(checkSession, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (isLive) {
+    return <LiveChampSelect onBack={() => setIsLive(false)} />;
+  }
 
   const testConnection = async () => {
     setLoading(true);
@@ -153,6 +175,21 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
         </div>
 
         <div className="bg-[#1a1a1a] border-2 border-[#333] p-10 rounded-3xl shadow-2xl flex flex-col items-center gap-8 w-full max-w-lg">
+          {/* Live Draft Section */}
+          {hasLiveSession && (
+            <div className="w-full flex flex-col gap-4">
+              <h2 className="text-sm text-[#3498db] uppercase tracking-[0.2em] font-black text-center border-b border-[#3498db]/30 pb-2">
+                Live Draft Detected
+              </h2>
+              <button
+                onClick={() => setIsLive(true)}
+                className="w-full py-4 rounded-xl font-black uppercase tracking-widest bg-gradient-to-r from-[#3498db] to-[#2ecc71] hover:from-[#2980b9] hover:to-[#27ae60] shadow-[0_0_30px_rgba(52,152,219,0.4)] transition-all duration-300 transform hover:scale-[1.02] active:scale-95 animate-pulse"
+              >
+                Enter Live Draft View
+              </button>
+            </div>
+          )}
+
           {/* Connection Test Section */}
           <div className="w-full flex flex-col gap-4">
             <h2 className="text-sm text-[#888] uppercase tracking-widest font-bold text-center border-b border-[#333] pb-2">
