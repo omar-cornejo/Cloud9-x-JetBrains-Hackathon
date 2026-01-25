@@ -175,10 +175,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   const handleSelectChampion = async (champion: Champion) => {
     // Allow hovering during planning/finalization phase or when it's your turn
-    const canHover = currentAction.isMyTurn ||
-        currentAction.phase === "PLANNING" ||
-        currentAction.phase === "FINALIZATION";
-    if (!canHover) return;
+
 
     setStagedChampion(champion);
 
