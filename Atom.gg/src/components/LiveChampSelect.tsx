@@ -4,9 +4,11 @@ import { Champion } from "../types/draft";
 import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
+import { NoActiveDraft } from "./NoActiveDraft";
 
 interface LiveChampSelectProps {
   onBack: () => void;
+  onHome: () => void;
 }
 
 interface CurrentAction {
@@ -16,7 +18,7 @@ interface CurrentAction {
   phase: string;
 }
 
-export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
+export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [champions, setChampions] = useState<Champion[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [session, setSession] = useState<any>(null);
@@ -78,11 +80,10 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
       if (myCurrentAction) break;
     }
 
+    //time left - account for time elapsed since session was fetched
     let timeLeft = 0;
     if (timer.adjustedTimeLeftInPhase !== undefined && timer.internalNowInEpochMs !== undefined) {
-      //alculate elapsed time since the session snapshot
       const elapsedSinceSnapshot = currentTime - timer.internalNowInEpochMs;
-      //subtract elapsed time from the adjusted time left
       const remainingMs = timer.adjustedTimeLeftInPhase - elapsedSinceSnapshot;
       timeLeft = Math.max(0, Math.ceil(remainingMs / 1000)) - 1;
       if (timeLeft < 0) timeLeft = 0;
@@ -100,7 +101,7 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
       };
     }
 
-    //if any action is in progres besides ours -> not our turn
+    //check if any action is in progress (not our turn)
     let someoneElseTurn = false;
     let actionType: "ban" | "pick" | null = null;
 
@@ -137,7 +138,7 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
     return () => clearInterval(interval);
   }, []);
 
-  //sesion polling interval
+  //session polling interval
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -154,34 +155,26 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
 
   if (!session && !error) {
     return (
-        <div className="flex items-center justify-center h-full text-white">
-          Loading Champ Select Session...
+        <div className="flex items-center justify-center h-full w-full bg-[#121212] text-white">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin" />
+            <p className="text-xl font-bold uppercase tracking-widest text-[#3498db]">Loading Session...</p>
+          </div>
         </div>
     );
   }
 
   if (error) {
-    return (
-        <div className="flex flex-col items-center justify-center h-full text-white gap-4">
-          <p className="text-xl font-bold">{error}</p>
-          <button
-              onClick={onBack}
-              className="px-6 py-2 bg-[#3498db] rounded-lg font-bold"
-          >
-            Back
-          </button>
-        </div>
-    );
+    return <NoActiveDraft onHome={onHome} />;
   }
 
   const myTeam = session.myTeam || [];
   const theirTeam = session.theirTeam || [];
-  const bans = session.bans || { myTeamBans: [], theirTeamBans: [] };
 
   const getChamp = (id: number) => championsMap.get(id) || null;
 
   const handleSelectChampion = async (champion: Champion) => {
-    //allow hovering during planning/finalization phase or when it's your turn
+    // Allow hovering during planning/finalization phase or when it's your turn
     const canHover = currentAction.isMyTurn ||
         currentAction.phase === "PLANNING" ||
         currentAction.phase === "FINALIZATION";

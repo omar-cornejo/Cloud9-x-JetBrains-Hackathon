@@ -46,7 +46,7 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
   }, []);
 
   if (isLive) {
-    return <LiveChampSelect onBack={() => setIsLive(false)} />;
+    return <LiveChampSelect onBack={() => setIsLive(false)} onHome={onBack} />;
   }
 
   const testConnection = async () => {
