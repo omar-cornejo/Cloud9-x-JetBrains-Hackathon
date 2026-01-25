@@ -30,6 +30,36 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
     return map;
   }, [champions]);
 
+  const bansFromActions = useMemo(() => {
+    if (!session) return { myTeamBans: [], theirTeamBans: [] };
+
+    const myTeam = session.myTeam || [];
+    const actions = session.actions || [];
+
+    const myTeamBans: number[] = [];
+    const theirTeamBans: number[] = [];
+
+    //cell IDs from my team
+    const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
+
+    //extract bans from actions
+    for (const group of actions) {
+      if (Array.isArray(group)) {
+        for (const action of group) {
+          if (action.type === "ban" && action.completed && action.championId > 0) {
+            if (myTeamCellIds.has(action.actorCellId)) {
+              myTeamBans.push(action.championId);
+            } else {
+              theirTeamBans.push(action.championId);
+            }
+          }
+        }
+      }
+    }
+
+    return { myTeamBans, theirTeamBans };
+  }, [session]);
+
   const currentAction = useMemo((): CurrentAction => {
     if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING" };
 
@@ -236,10 +266,10 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
               Blue Side <span className="text-[#666]">bans</span>
             </div>
             <div className="flex gap-1.5">
-              {bans.myTeamBans.map((id: number, i: number) => (
+              {bansFromActions.myTeamBans.map((id: number, i: number) => (
                   <BanSlot key={i} ban={getChamp(id)} />
               ))}
-              {Array.from({ length: 5 - bans.myTeamBans.length }).map((_, i) => (
+              {Array.from({ length: 5 - bansFromActions.myTeamBans.length }).map((_, i) => (
                   <BanSlot key={`empty-my-${i}`} ban={null} />
               ))}
             </div>
@@ -289,10 +319,10 @@ export function LiveChampSelect({ onBack }: LiveChampSelectProps) {
               Red Side <span className="text-[#666]">bans</span>
             </div>
             <div className="flex gap-1.5">
-              {bans.theirTeamBans.map((id: number, i: number) => (
+              {bansFromActions.theirTeamBans.map((id: number, i: number) => (
                   <BanSlot key={i} ban={getChamp(id)} />
               ))}
-              {Array.from({ length: 5 - bans.theirTeamBans.length }).map((_, i) => (
+              {Array.from({ length: 5 - bansFromActions.theirTeamBans.length }).map((_, i) => (
                   <BanSlot key={`empty-their-${i}`} ban={null} />
               ))}
             </div>
