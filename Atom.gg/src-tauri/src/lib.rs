@@ -2,12 +2,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+mod lcu;
+mod lcu_utils;
+
 const DDRAGON_VERSION: &str = "16.1.1";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChampionShort {
     pub name: String,
     pub id: String,
+    pub numeric_id: i32,
     pub icon: String,
     pub splash: String,
 }
@@ -21,6 +25,7 @@ struct DDragonResponse {
 struct ChampionData {
     name: String,
     id: String,
+    key: String,
 }
 
 #[tauri::command]
@@ -36,11 +41,15 @@ async fn get_all_champions() -> Result<Vec<ChampionShort>, String> {
 
     let champions = response.data
         .into_values()
-        .map(|champ| ChampionShort {
-            name: champ.name.clone(),
-            id: champ.id.clone(),
-            icon: get_champion_icon(champ.id.clone()),
-            splash: get_champion_splash(champ.id),
+        .map(|champ| {
+            let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
+            ChampionShort {
+                name: champ.name.clone(),
+                id: champ.id.clone(),
+                numeric_id,
+                icon: get_champion_icon(champ.id.clone()),
+                splash: get_champion_splash(champ.id),
+            }
         })
         .collect();
 
@@ -102,7 +111,15 @@ pub fn run() {
             get_all_champions, 
             get_champion_icon, 
             get_champion_splash,
-            get_team_players
+            get_team_players,
+            lcu::get_current_summoner,
+            lcu::get_random_champion,
+            lcu::hover_champion,
+            lcu::lock_champion,
+            lcu::hover_ban,
+            lcu::lock_ban,
+            lcu::is_lcu_available,
+            lcu::get_champ_select_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -180,6 +197,7 @@ mod tests {
         let aatrox = ChampionShort {
             name: aatrox_data.name.clone(),
             id: aatrox_data.id.clone(),
+            numeric_id: 266,
             icon: get_champion_icon(aatrox_data.id.clone()),
             splash: get_champion_splash(aatrox_data.id.clone()),
         };

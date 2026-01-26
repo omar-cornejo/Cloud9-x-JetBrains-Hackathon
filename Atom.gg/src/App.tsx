@@ -3,9 +3,10 @@ import "./App.css";
 import Drafter from "./pages/drafter";
 import { Setup } from "./pages/setup";
 import { Home } from "./pages/home";
+import { ClientDraft } from "./pages/client_draft";
 import { DraftConfig } from "./types/draft";
 
-type View = "home" | "setup" | "drafter";
+type View = "home" | "setup" | "drafter" | "client";
 
 function App() {
   const [view, setView] = useState<View>("home");
@@ -30,7 +31,21 @@ function App() {
   };
 
   if (view === "home") {
-    return <Home onSelectMode={(mode) => mode === "simulator" && handleStartSetup()} />;
+    return (
+      <Home
+        onSelectMode={(mode) => {
+          if (mode === "simulator") {
+            handleStartSetup();
+          } else if (mode === "client") {
+            setView("client");
+          }
+        }}
+      />
+    );
+  }
+
+  if (view === "client") {
+    return <ClientDraft onBack={handleBackToHome} />;
   }
 
   if (view === "setup") {

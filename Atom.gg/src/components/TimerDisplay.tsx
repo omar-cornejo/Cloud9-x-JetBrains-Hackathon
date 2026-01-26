@@ -39,7 +39,15 @@ export function TimerDisplay({
             >
               {activeTurn.team === "blue" ? blueTeamName : redTeamName}
             </span>{" "}
-            {activeTurn.type}
+            <span
+              className={
+                activeTurn.type === "pick"
+                  ? "text-[#3498db]"
+                  : "text-[#e74c3c]"
+              }
+            >
+              {activeTurn.type}
+            </span>
           </span>
         ) : (
           "Complete"
