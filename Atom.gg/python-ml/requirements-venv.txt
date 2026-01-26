@@ -1,0 +1,6 @@
+polars
+xgboost
+numpy
+requests
+pandas
+pyarrow

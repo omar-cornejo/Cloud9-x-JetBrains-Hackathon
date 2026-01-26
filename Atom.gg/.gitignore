@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Python
+python-ml/.venv/
+
 # Build
 dist/
 dist-ssr/

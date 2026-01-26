@@ -1,12 +1,37 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion, DraftConfig, TeamPlayers } from "../types/draft";
+import type { MlRole, MlSuggestPayload, MlResponse, MlRecommendation } from "../types/ml";
 import { DRAFT_SEQUENCE, NONE_CHAMPION } from "../constants/draft";
 import { BanSlot } from "../components/BanSlot";
 import { PickSlot } from "../components/PickSlot";
 import { ChampionCard } from "../components/ChampionCard";
 import { TimerDisplay } from "../components/TimerDisplay";
 import "./drafter.css";
+
+const ALL_ROLES: MlRole[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+const UI_ROLES: MlRole[] = ["ALL", ...ALL_ROLES];
+
+function roleIconUrl(role: MlRole): string {
+  const lane =
+    role === "TOP" ? "top" :
+    role === "JUNGLE" ? "jungle" :
+    role === "MIDDLE" ? "middle" :
+    role === "BOTTOM" ? "bottom" :
+    role === "UTILITY" ? "utility" :
+    "fill";
+  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-${lane}.png`;
+}
+
+function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
+  return (
+    <img
+      src={roleIconUrl(role)}
+      alt={role}
+      className={`w-6 h-6 rounded ${active ? "opacity-100" : "opacity-70"}`}
+    />
+  );
+}
 
 interface DrafterProps {
   config: DraftConfig;
@@ -20,6 +45,10 @@ function Drafter({ config, onBack }: DrafterProps) {
   const [gameNumber, setGameNumber] = useState(1);
   const [isTeam1Blue, setIsTeam1Blue] = useState(config.isTeam1Blue);
   const [globalLockedChampions, setGlobalLockedChampions] = useState<Set<string>>(new Set());
+
+  const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
+  const [mlSuggest, setMlSuggest] = useState<MlSuggestPayload | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
 
   const [blueBans, setBlueBans] = useState<(Champion | null)[]>(Array(5).fill(null));
   const [redBans, setRedBans] = useState<(Champion | null)[]>(Array(5).fill(null));
@@ -38,6 +67,88 @@ function Drafter({ config, onBack }: DrafterProps) {
   const [currentTurn, setCurrentTurn] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
 
+  const championByName = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.name, c));
+    return map;
+  }, [champions]);
+
+  const championById = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [champions]);
+
+  const resolveChampion = useCallback(
+    (mlChampionKey: string): Champion | undefined => {
+      // The ML stack (ported from Testing.ipynb) uses DDragon champion ids (e.g. "MonkeyKing"),
+      // while the UI often shows the display name (e.g. "Wukong").
+      return championById.get(mlChampionKey) ?? championByName.get(mlChampionKey);
+    },
+    [championById, championByName]
+  );
+
+  const suggestContext = useMemo<{
+    isBanMode: boolean;
+    mySide: "BLUE" | "RED";
+    analyzeSide: "BLUE" | "RED";
+    label: string;
+  }>(() => {
+    if (currentTurn >= DRAFT_SEQUENCE.length) {
+      return { isBanMode: false, mySide: "BLUE", analyzeSide: "BLUE", label: "Recommendations" };
+    }
+
+    const turn = DRAFT_SEQUENCE[currentTurn];
+    const isBanMode = turn.type === "ban";
+
+    // Match Testing.ipynb behavior:
+    // - Picks: suggest picks for the side that is picking.
+    // - Bans: suggest bans against the *enemy* side (sb command).
+    const mySide: "BLUE" | "RED" = turn.team === "blue" ? "BLUE" : "RED";
+
+    // Match Testing.ipynb semantics:
+    // - `s b` / `s r`   => recommend PICKS for that same side.
+    // - `sb b` / `sb r` => recommend BANS by analyzing threats of the ENEMY side.
+    const analyzeSide: "BLUE" | "RED" = isBanMode ? (mySide === "BLUE" ? "RED" : "BLUE") : mySide;
+
+    const label = isBanMode ? "Ban Suggestions" : "Pick Suggestions";
+    return { isBanMode, mySide, analyzeSide, label };
+  }, [currentTurn]);
+
+  const refreshRecommendationsForTurn = useCallback(async (idx: number) => {
+    try {
+      let isBanMode = false;
+      let analyzeSide: "BLUE" | "RED" = "BLUE";
+
+      if (idx < DRAFT_SEQUENCE.length) {
+        const t = DRAFT_SEQUENCE[idx];
+        isBanMode = t.type === "ban";
+        const mySide: "BLUE" | "RED" = t.team === "blue" ? "BLUE" : "RED";
+        analyzeSide = isBanMode ? (mySide === "BLUE" ? "RED" : "BLUE") : mySide;
+      }
+
+      const res = (await invoke("ml_suggest", {
+        targetSide: analyzeSide,
+        isBanMode,
+        roles: ALL_ROLES,
+      })) as MlResponse;
+
+      if (!res.ok) {
+        setMlError(res.error ?? "ML error");
+        return;
+      }
+
+      setMlError(null);
+      setMlSuggest(res.payload as MlSuggestPayload);
+    } catch (e: any) {
+      setMlError(e?.toString?.() ?? "Failed to fetch ML suggestions");
+    }
+  }, []);
+
+  const refreshRecommendations = useCallback(() => {
+    return refreshRecommendationsForTurn(currentTurn);
+  }, [currentTurn, refreshRecommendationsForTurn]);
+
   const currentDraftSelectedNames = useMemo(() => {
     return new Set(
       [...blueBans, ...redBans, ...bluePicks, ...redPicks]
@@ -52,6 +163,29 @@ function Drafter({ config, onBack }: DrafterProps) {
     return combined;
   }, [globalLockedChampions, currentDraftSelectedNames]);
 
+  const visibleRecommendations = useMemo(() => {
+    if (!mlSuggest) return [];
+    const recommendationsMap = (mlSuggest.recommendations ?? {}) as Record<string, MlRecommendation[]>;
+    let recs: MlRecommendation[] = [];
+
+    if (selectedRole === "ALL") {
+      const allRecs = Object.values(recommendationsMap).flat();
+      const uniqueRecs = new Map<string, MlRecommendation>();
+      allRecs.sort((a, b) => b.score - a.score).forEach((r) => {
+        if (!uniqueRecs.has(r.champion)) {
+          uniqueRecs.set(r.champion, r);
+        }
+      });
+      recs = Array.from(uniqueRecs.values()).sort((a, b) => b.score - a.score);
+    } else {
+      recs = recommendationsMap[selectedRole] ?? [];
+    }
+
+    return recs
+      .map((rec) => ({ rec, champ: resolveChampion(rec.champion) }))
+      .filter(({ champ }) => !champ || !allLockedNames.has(champ.name));
+  }, [mlSuggest, selectedRole, resolveChampion, allLockedNames]);
+
   useEffect(() => {
     invoke<Champion[]>("get_all_champions")
       .then((data) => {
@@ -59,6 +193,14 @@ function Drafter({ config, onBack }: DrafterProps) {
       })
       .catch((err) => {
         console.error("Failed to fetch champions:", err);
+      });
+
+    // Start ML subprocess and configure series/teams.
+    invoke("ml_init", { config })
+      .then(() => refreshRecommendationsForTurn(0))
+      .catch((err) => {
+        console.error("Failed to init ML:", err);
+        setMlError("Failed to init ML process");
       });
 
     // Fetch team players
@@ -69,7 +211,7 @@ function Drafter({ config, onBack }: DrafterProps) {
     invoke<TeamPlayers>("get_team_players", { teamName: config.team2 })
       .then((data) => setTeam2Players(data))
       .catch((err) => console.error(`Failed to fetch players for ${config.team2}:`, err));
-  }, [config.team1, config.team2]);
+  }, [config, refreshRecommendationsForTurn]);
 
   useEffect(() => {
     if (currentTurn >= DRAFT_SEQUENCE.length) {
@@ -143,10 +285,29 @@ function Drafter({ config, onBack }: DrafterProps) {
           });
         }
       }
+
+      // Forward action to ML (ignore NONE placeholder).
+      if (champion.name !== "none") {
+        const side = isBlue ? "blue" : "red";
+        const promise = isBan
+          ? invoke("ml_ban", { champion: champion.id })
+          : invoke("ml_pick", { side, champion: champion.id });
+
+        promise
+          .then(() => refreshRecommendationsForTurn(currentTurn + 1))
+          .catch((err) => {
+            console.error("Failed to update ML:", err);
+            setMlError("Failed to send draft action to ML");
+          });
+      } else {
+        // Still refresh suggestions when a timer auto-locks NONE.
+        refreshRecommendationsForTurn(currentTurn + 1);
+      }
+
       setCurrentTurn((prev) => prev + 1);
       setStagedChampion(null);
     },
-    [currentTurn, allLockedNames]
+    [currentTurn, allLockedNames, refreshRecommendationsForTurn]
   );
 
   const handleNextGame = () => {
@@ -164,6 +325,14 @@ function Drafter({ config, onBack }: DrafterProps) {
 
     setGlobalLockedChampions(newLocked);
     setGameNumber((prev) => prev + 1);
+
+    // Tell ML we are moving to the next match (preserves Fearless/Ironman carry-over).
+    invoke("ml_next_game")
+      .then(() => refreshRecommendationsForTurn(0))
+      .catch((err) => {
+        console.error("Failed to advance ML to next game:", err);
+        setMlError("Failed to advance ML to next game");
+      });
 
     setBlueBans(Array(5).fill(null));
     setRedBans(Array(5).fill(null));
@@ -257,7 +426,18 @@ function Drafter({ config, onBack }: DrafterProps) {
                   </div>
                   
                   <button
-                    onClick={() => setIsTeam1Blue(!isTeam1Blue)}
+                    onClick={() => {
+                      const nextIsTeam1Blue = !isTeam1Blue;
+                      setIsTeam1Blue(nextIsTeam1Blue);
+                      const nextBlue = nextIsTeam1Blue ? config.team1 : config.team2;
+                      const nextRed = nextIsTeam1Blue ? config.team2 : config.team1;
+                      invoke("ml_set_sides", { blueTeam: nextBlue, redTeam: nextRed })
+                        .then(() => refreshRecommendations())
+                        .catch((err) => {
+                          console.error("Failed to update ML sides:", err);
+                          setMlError("Failed to update ML sides");
+                        });
+                    }}
                     className="p-3 bg-[#1a1a1a] hover:bg-[#333] border border-[#444] rounded-full text-[#3498db] transition-all group"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 transform group-hover:rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -393,8 +573,104 @@ function Drafter({ config, onBack }: DrafterProps) {
             Confirm
           </button>
           <div className="flex-1 border-2 border-[#333] bg-[#1a1a1a] flex items-center justify-center rounded-lg">
-            <div className="text-[#333] text-2xl font-black text-center uppercase tracking-[0.3em]">
-              Recommendations
+            <div className="w-full h-full p-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs">
+                  {suggestContext.label} ({suggestContext.mySide}{suggestContext.isBanMode ? ` vs ${suggestContext.analyzeSide}` : ""})
+                </div>
+                <button
+                  onClick={() => refreshRecommendations()}
+                  className="px-3 py-1 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {mlSuggest && (
+                <div className="text-[10px] font-bold uppercase tracking-widest text-[#444]">
+                  ML: {mlSuggest.target_side} {mlSuggest.is_ban_mode ? "BAN" : "PICK"}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                {UI_ROLES.map((role) => (
+                  <button
+                    key={role}
+                    onClick={() => setSelectedRole(role)}
+                    className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                      selectedRole === role
+                        ? "bg-[#3498db] border-[#3498db] text-white"
+                        : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                    }`}
+                    title={role}
+                  >
+                    <RoleIcon role={role} active={selectedRole === role} />
+                    {role === "MIDDLE" ? "MID" : role === "BOTTOM" ? "ADC" : role === "UTILITY" ? "SUPPORT" : role === "ALL" ? "TODOS" : role}
+                  </button>
+                ))}
+              </div>
+
+              {mlError && (
+                <div className="text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
+                  {mlError}
+                </div>
+              )}
+
+              <div className="flex-1 overflow-y-auto no-scrollbar pr-1">
+                {mlSuggest ? (
+                  <div className="flex flex-col gap-2">
+                    {visibleRecommendations.map(({ rec, champ }) => {
+                      return (
+                        <div
+                          key={`${selectedRole}-${rec.champion}`}
+                          className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
+                          onClick={() => {
+                            if (champ) {
+                              setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
+                            }
+                          }}
+                        >
+                          {champ ? (
+                            <img
+                              src={champ.icon}
+                              alt={champ.name}
+                              className="w-10 h-10 border border-[#333]"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 border border-[#333] bg-[#222]" />
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="truncate font-black uppercase tracking-wide text-sm">
+                                {champ ? champ.name : rec.champion}
+                              </div>
+                              <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
+                                {(rec.score * 100).toFixed(1)}%
+                              </div>
+                            </div>
+                            {rec.tactical && (
+                              <div className="text-[10px] text-[#aaa] mt-1 leading-snug">
+                                {rec.tactical}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {visibleRecommendations.length === 0 && (
+                      <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
+                        No recommendations
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
+                    Waiting for ML...
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
