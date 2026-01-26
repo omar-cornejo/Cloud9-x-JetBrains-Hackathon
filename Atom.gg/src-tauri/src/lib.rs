@@ -348,7 +348,7 @@ pub fn run() {
             lcu::hover_ban,
             lcu::lock_ban,
             lcu::is_lcu_available,
-            lcu::get_champ_select_session
+            lcu::get_champ_select_session,
             get_team_players,
             ml_init,
             ml_set_sides,

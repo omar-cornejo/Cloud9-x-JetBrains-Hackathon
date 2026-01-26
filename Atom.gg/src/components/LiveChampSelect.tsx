@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion } from "../types/draft";
+import { NONE_CHAMPION } from "../constants/draft";
 import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
@@ -124,6 +125,41 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     };
   }, [session, currentTime]);
 
+  const unavailableChampionIds = useMemo(() => {
+    if (!session) return new Set<number>();
+
+    const unavailable = new Set<number>();
+
+    // Add all bans
+    bansFromActions.myTeamBans.forEach(id => unavailable.add(id));
+    bansFromActions.theirTeamBans.forEach(id => unavailable.add(id));
+
+    // Add all locked-in picks
+    const myTeam = session.myTeam || [];
+    const theirTeam = session.theirTeam || [];
+
+    [...myTeam, ...theirTeam].forEach((player: any) => {
+      if (player.championId > 0) {
+        unavailable.add(player.championId);
+      }
+    });
+
+    return unavailable;
+  }, [session, bansFromActions]);
+
+  const filteredChampions = useMemo(() => {
+    const filtered = [...champions]
+      .filter((champ) =>
+        champ.name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!searchTerm || "none".includes(searchTerm.toLowerCase())) {
+      return [NONE_CHAMPION, ...filtered];
+    }
+    return filtered;
+  }, [champions, searchTerm]);
+
   useEffect(() => {
     invoke<Champion[]>("get_all_champions")
         .then(setChampions)
@@ -174,8 +210,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const getChamp = (id: number) => championsMap.get(id) || null;
 
   const handleSelectChampion = async (champion: Champion) => {
-    // Allow hovering during planning/finalization phase or when it's your turn
-
+    if (champion.name !== "none" && unavailableChampionIds.has(champion.numeric_id)) {
+      return;
+    }
 
     setStagedChampion(champion);
 
@@ -193,6 +230,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const handleConfirm = async () => {
     if (!currentAction.isMyTurn || !stagedChampion) return;
 
+    if (stagedChampion.name === "none") return;
+
     try {
       if (currentAction.type === "pick") {
         await invoke("lock_champion");
@@ -204,10 +243,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       console.error("Failed to lock:", err);
     }
   };
-
-  const filteredChampions = champions.filter((c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const getPhaseText = () => {
     const phase = currentAction.phase;
@@ -238,14 +273,15 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   };
 
   const getConfirmButtonColor = () => {
-    if (currentAction.type === "ban") {
-      return stagedChampion
-          ? "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]"
-          : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
+    //if no champion or "none" is selected
+    if (!stagedChampion || stagedChampion.name === "none") {
+      return "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
     }
-    return stagedChampion
-        ? "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]"
-        : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
+
+    if (currentAction.type === "ban") {
+      return "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]";
+    }
+    return "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]";
   };
 
   return (
@@ -351,7 +387,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                     <ChampionCard
                         key={champ.id}
                         champion={champ}
-                        isSelected={false}
+                        isSelected={champ.name !== "none" && unavailableChampionIds.has(champ.numeric_id)}
                         isStaged={stagedChampion?.id === champ.id}
                         onSelect={(c) => handleSelectChampion(c)}
                     />
@@ -360,9 +396,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
             <button
                 onClick={handleConfirm}
-                disabled={!stagedChampion || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
+                disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
                 className={`w-full py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
-                    stagedChampion && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
+                    stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
                         : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
                 }`}
