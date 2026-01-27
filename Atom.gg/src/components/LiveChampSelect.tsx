@@ -1,11 +1,15 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion } from "../types/draft";
+import type { MlRecommendation, MlResponse, MlRole, MlSuggestPayload } from "../types/ml";
 import { NONE_CHAMPION } from "../constants/draft";
 import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
 import { NoActiveDraft } from "./NoActiveDraft";
+
+const ALL_ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+const UI_ROLES: MlRole[] = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 
 interface LiveChampSelectProps {
   onBack: () => void;
@@ -27,11 +31,40 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [stagedChampion, setStagedChampion] = useState<Champion | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  const [mlReady, setMlReady] = useState(false);
+  const [mlMyPickSuggest, setMlMyPickSuggest] = useState<MlSuggestPayload | null>(null);
+  const [mlBanSuggest, setMlBanSuggest] = useState<MlSuggestPayload | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
+  const [mlSyncTick, setMlSyncTick] = useState(0);
+  const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
+
+  const sentActionKeysRef = useRef<Set<string>>(new Set());
+
   const championsMap = useMemo(() => {
     const map = new Map<number, Champion>();
     champions.forEach((c) => map.set(c.numeric_id, c));
     return map;
   }, [champions]);
+
+  const championById = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [champions]);
+
+  const championByName = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.name, c));
+    return map;
+  }, [champions]);
+
+  const resolveChampion = useCallback(
+    (mlChampionKey: string): Champion | undefined => {
+      // ML uses DDragon champion ids (e.g. "MonkeyKing") but can sometimes return display names.
+      return championById.get(mlChampionKey) ?? championByName.get(mlChampionKey);
+    },
+    [championById, championByName]
+  );
 
   const bansFromActions = useMemo(() => {
     if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
@@ -78,6 +111,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
     let myCurrentAction = null;
     for (const group of actions) {
+      if (!Array.isArray(group)) continue;
       for (const action of group) {
         if (action.actorCellId === localCellId && action.isInProgress && !action.completed) {
           myCurrentAction = action;
@@ -113,6 +147,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     let actionType: "ban" | "pick" | null = null;
 
     for (const group of actions) {
+      if (!Array.isArray(group)) continue;
       for (const action of group) {
         if (action.isInProgress && !action.completed) {
           someoneElseTurn = true;
@@ -153,6 +188,28 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return unavailable;
   }, [session, bansFromActions]);
 
+  const lockedChampionNames = useMemo(() => {
+    if (!session) return new Set<string>();
+
+    const names = new Set<string>();
+    const addChampionId = (id: number) => {
+      if (!id || id <= 0) return;
+      const champ = championsMap.get(id);
+      if (champ && champ.name !== "none") names.add(champ.name);
+    };
+
+    for (const id of bansFromActions.myTeamBans) addChampionId(id);
+    for (const id of bansFromActions.theirTeamBans) addChampionId(id);
+
+    const myTeam = session.myTeam || [];
+    const theirTeam = session.theirTeam || [];
+    [...myTeam, ...theirTeam].forEach((player: any) => {
+      if (player?.championId > 0) addChampionId(player.championId);
+    });
+
+    return names;
+  }, [session, bansFromActions, championsMap]);
+
   const filteredChampions = useMemo(() => {
     const filtered = [...champions]
       .filter((champ) =>
@@ -170,6 +227,30 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     invoke<Champion[]>("get_all_champions")
         .then(setChampions)
         .catch((err) => console.error("Failed to fetch champions:", err));
+  }, []);
+
+  // Initialize ML for live (client) draft recommendations.
+  useEffect(() => {
+    const config = {
+      team1: "Client",
+      team2: "Enemy",
+      isTeam1Blue: true,
+      mode: "Normal",
+      numGames: 1,
+    };
+
+    invoke("ml_init", { config })
+      .then(() => {
+        setMlReady(true);
+        setMlError(null);
+        sentActionKeysRef.current = new Set();
+        setMlSyncTick((t) => t + 1);
+      })
+      .catch((err) => {
+        console.error("Failed to init ML:", err);
+        setMlReady(false);
+        setMlError("Failed to init ML process");
+      });
   }, []);
 
   useEffect(() => {
@@ -195,25 +276,170 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return () => clearInterval(interval);
   }, []);
 
-  if (!session && !error) {
-    return (
-        <div className="flex items-center justify-center h-full w-full bg-[#121212] text-white">
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin" />
-            <p className="text-xl font-bold uppercase tracking-widest text-[#3498db]">Loading Session...</p>
-          </div>
-        </div>
-    );
-  }
-
-  if (error) {
-    return <NoActiveDraft onHome={onHome} />;
-  }
-
-  const myTeam = session.myTeam || [];
-  const theirTeam = session.theirTeam || [];
+  const myTeam = session?.myTeam || [];
+  const theirTeam = session?.theirTeam || [];
 
   const getChamp = (id: number) => championsMap.get(id) || null;
+
+  const canShowRecommendations =
+    currentAction.isMyTurn &&
+    (currentAction.type === "pick" || currentAction.type === "ban") &&
+    currentAction.phase !== "PLANNING" &&
+    currentAction.phase !== "FINALIZATION";
+
+  const suggestContext = useMemo(() => {
+    const isBanMode = currentAction.type === "ban";
+    const mySide: "BLUE" | "RED" = "BLUE";
+    const analyzeSide: "BLUE" | "RED" = isBanMode ? "RED" : "BLUE";
+    const label = isBanMode ? "Ban Suggestions" : "Pick Suggestions";
+    return { isBanMode, mySide, analyzeSide, label };
+  }, [currentAction.type]);
+
+  const refreshRecommendations = useCallback(async () => {
+    try {
+      setMlError(null);
+
+      if (currentAction.type === "ban") {
+        const res = (await invoke("ml_suggest", {
+          targetSide: "RED",
+          isBanMode: true,
+          roles: ALL_ROLES,
+        })) as MlResponse;
+
+        if (!res.ok) {
+          setMlError(res.error ?? "ML error");
+          return;
+        }
+
+        setMlBanSuggest(res.payload as MlSuggestPayload);
+      } else {
+        const res = (await invoke("ml_suggest", {
+          targetSide: "BLUE",
+          isBanMode: false,
+          roles: ALL_ROLES,
+        })) as MlResponse;
+
+        if (!res.ok) {
+          setMlError(res.error ?? "ML error");
+          return;
+        }
+
+        setMlMyPickSuggest(res.payload as MlSuggestPayload);
+      }
+    } catch (e: any) {
+      setMlError(e?.toString?.() ?? "Failed to fetch ML suggestions");
+    }
+  }, [currentAction.type]);
+
+  // Sync completed actions (picks/bans) from the live match into ML.
+  useEffect(() => {
+    if (!mlReady) return;
+    if (!session) return;
+    if (championsMap.size === 0) return;
+
+    const actions = session.actions || [];
+    const myTeamCellIds = new Set<number>((session.myTeam || []).map((p: any) => p.cellId));
+
+    const completed: any[] = [];
+    for (const group of actions) {
+      if (!Array.isArray(group)) continue;
+      for (const action of group) {
+        if (!action || !action.completed) continue;
+        if (action.championId == null || action.championId <= 0) continue;
+        if (action.type !== "pick" && action.type !== "ban") continue;
+        completed.push(action);
+      }
+    }
+
+    completed.sort((a, b) => {
+      const ai = typeof a.id === "number" ? a.id : 0;
+      const bi = typeof b.id === "number" ? b.id : 0;
+      return ai - bi;
+    });
+
+    let cancelled = false;
+    (async () => {
+      let sentAny = false;
+
+      for (const action of completed) {
+        if (cancelled) return;
+
+        const key = action.id != null ? String(action.id) : `${action.type}:${action.actorCellId}:${action.championId}`;
+        if (sentActionKeysRef.current.has(key)) continue;
+
+        const champ = championsMap.get(action.championId);
+        const championKey = champ?.id;
+        if (!championKey || championKey === "none") {
+          sentActionKeysRef.current.add(key);
+          continue;
+        }
+
+        try {
+          if (action.type === "ban") {
+            await invoke("ml_ban", { champion: championKey });
+          } else {
+            const side = myTeamCellIds.has(action.actorCellId) ? "blue" : "red";
+            await invoke("ml_pick", { side, champion: championKey });
+          }
+          sentActionKeysRef.current.add(key);
+          sentAny = true;
+        } catch (err) {
+          console.error("Failed to sync ML action:", err);
+          setMlError("Failed to send draft actions to ML");
+          return;
+        }
+      }
+
+      if (sentAny) {
+        setMlSyncTick((t) => t + 1);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mlReady, session, championsMap]);
+
+  // Only fetch/display recs when it's your pick turn.
+  useEffect(() => {
+    if (!canShowRecommendations) return;
+    refreshRecommendations();
+  }, [canShowRecommendations, mlSyncTick, refreshRecommendations]);
+
+  const activeMlSuggest = useMemo(() => {
+    if (currentAction.type === "ban") return mlBanSuggest;
+    if (currentAction.type === "pick") return mlMyPickSuggest;
+    return null;
+  }, [currentAction.type, mlBanSuggest, mlMyPickSuggest]);
+
+  const visibleRecommendations = useMemo(() => {
+    if (!activeMlSuggest) return [];
+    const recommendationsMap = (activeMlSuggest.recommendations ?? {}) as Record<string, MlRecommendation[]>;
+
+    let recs: MlRecommendation[] = [];
+    if (selectedRole === "ALL") {
+      const allRecs = Object.values(recommendationsMap).flat();
+      const uniqueRecs = new Map<string, MlRecommendation>();
+      allRecs
+        .slice()
+        .sort((a, b) => b.score - a.score)
+        .forEach((r) => {
+          if (!uniqueRecs.has(r.champion)) uniqueRecs.set(r.champion, r);
+        });
+      recs = Array.from(uniqueRecs.values()).sort((a, b) => b.score - a.score);
+    } else {
+      recs = recommendationsMap[selectedRole] ?? [];
+    }
+
+    return recs
+      .map((rec) => ({ rec, champ: resolveChampion(rec.champion) }))
+      .filter(({ champ }) => {
+        if (!champ) return true;
+        if (champ.name === "none") return false;
+        if (lockedChampionNames.has(champ.name)) return false;
+        return !unavailableChampionIds.has(champ.numeric_id);
+      });
+  }, [activeMlSuggest, lockedChampionNames, resolveChampion, selectedRole, unavailableChampionIds]);
 
   const handleSelectChampion = async (champion: Champion) => {
     if (champion.name !== "none" && unavailableChampionIds.has(champion.numeric_id)) {
@@ -289,6 +515,22 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
     return "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]";
   };
+
+  // Keep these returns AFTER all hooks to preserve hook order.
+  if (!session && !error) {
+    return (
+      <div className="flex items-center justify-center h-full w-full bg-[#121212] text-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin" />
+          <p className="text-xl font-bold uppercase tracking-widest text-[#3498db]">Loading Session...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return <NoActiveDraft onHome={onHome} />;
+  }
 
   return (
       <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
@@ -413,6 +655,104 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             >
               {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Phase" : getConfirmButtonText()}
             </button>
+
+            {canShowRecommendations && (
+              <div className="mt-4 border-2 border-[#333] bg-[#1a1a1a] rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs">
+                    {suggestContext.label} ({suggestContext.mySide}{suggestContext.isBanMode ? ` vs ${suggestContext.analyzeSide}` : ""})
+                  </div>
+                  <button
+                    onClick={() => refreshRecommendations()}
+                    className="px-3 py-1 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {activeMlSuggest && (
+                  <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[#444]">
+                    ML: {activeMlSuggest.target_side} {activeMlSuggest.is_ban_mode ? "BAN" : "PICK"}
+                  </div>
+                )}
+
+                <div className="mt-3 flex gap-2 flex-wrap">
+                  {UI_ROLES.map((role) => (
+                    <button
+                      key={role}
+                      onClick={() => setSelectedRole(role)}
+                      className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                        selectedRole === role
+                          ? "bg-[#3498db] border-[#3498db] text-white"
+                          : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                      }`}
+                      title={role}
+                      type="button"
+                    >
+                      {role === "MIDDLE"
+                        ? "MID"
+                        : role === "BOTTOM"
+                        ? "ADC"
+                        : role === "UTILITY"
+                        ? "SUPPORT"
+                        : role === "ALL"
+                        ? "TODOS"
+                        : role}
+                    </button>
+                  ))}
+                </div>
+
+                {mlError && (
+                  <div className="mt-2 text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
+                    {mlError}
+                  </div>
+                )}
+
+                <div className="mt-3 max-h-[300px] overflow-y-auto no-scrollbar pr-1">
+                  {activeMlSuggest ? (
+                    <div className="flex flex-col gap-2">
+                      {visibleRecommendations.map(({ rec, champ }) => (
+                        <div
+                          key={`${selectedRole}-${rec.champion}`}
+                          className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
+                          onClick={() => {
+                            if (!champ) return;
+                            setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
+                            if (stagedChampion?.name !== champ.name) {
+                              handleSelectChampion(champ);
+                            }
+                          }}
+                        >
+                          {champ ? (
+                            <img src={champ.icon} alt={champ.name} className="w-10 h-10 border border-[#333]" />
+                          ) : (
+                            <div className="w-10 h-10 border border-[#333] bg-[#222]" />
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="truncate font-black uppercase tracking-wide text-sm">
+                                {champ ? champ.name : rec.champion}
+                              </div>
+                              <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
+                                {(rec.score * 100).toFixed(1)}%
+                              </div>
+                            </div>
+                            {rec.tactical && <div className="text-[10px] text-[#aaa] mt-1 leading-snug">{rec.tactical}</div>}
+                          </div>
+                        </div>
+                      ))}
+
+                      {visibleRecommendations.length === 0 && (
+                        <div className="text-[#444] text-xs font-bold uppercase tracking-widest">No recommendations</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-[#444] text-xs font-bold uppercase tracking-widest">Waiting for ML...</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-5 w-[220px]">
