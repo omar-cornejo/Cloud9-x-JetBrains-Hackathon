@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion } from "../types/draft";
+import { NONE_CHAMPION } from "../constants/draft";
 import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
@@ -33,13 +34,14 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }, [champions]);
 
   const bansFromActions = useMemo(() => {
-    if (!session) return { myTeamBans: [], theirTeamBans: [] };
+    if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
 
     const myTeam = session.myTeam || [];
     const actions = session.actions || [];
 
     const myTeamBans: number[] = [];
     const theirTeamBans: number[] = [];
+    const cellIdToBan = new Map<number, number>();
 
     //cell IDs from my team
     const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
@@ -48,18 +50,23 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     for (const group of actions) {
       if (Array.isArray(group)) {
         for (const action of group) {
-          if (action.type === "ban" && action.completed && action.championId > 0) {
-            if (myTeamCellIds.has(action.actorCellId)) {
-              myTeamBans.push(action.championId);
-            } else {
-              theirTeamBans.push(action.championId);
+          if (action.type === "ban" && action.championId > 0) {
+            // Track the latest ban action for each cellId (hovered or completed)
+            cellIdToBan.set(action.actorCellId, action.championId);
+
+            if (action.completed) {
+              if (myTeamCellIds.has(action.actorCellId)) {
+                myTeamBans.push(action.championId);
+              } else {
+                theirTeamBans.push(action.championId);
+              }
             }
           }
         }
       }
     }
 
-    return { myTeamBans, theirTeamBans };
+    return { myTeamBans, theirTeamBans, cellIdToBan };
   }, [session]);
 
   const currentAction = useMemo((): CurrentAction => {
@@ -124,6 +131,41 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     };
   }, [session, currentTime]);
 
+  const unavailableChampionIds = useMemo(() => {
+    if (!session) return new Set<number>();
+
+    const unavailable = new Set<number>();
+
+    // Add all bans
+    bansFromActions.myTeamBans.forEach(id => unavailable.add(id));
+    bansFromActions.theirTeamBans.forEach(id => unavailable.add(id));
+
+    // Add all locked-in picks
+    const myTeam = session.myTeam || [];
+    const theirTeam = session.theirTeam || [];
+
+    [...myTeam, ...theirTeam].forEach((player: any) => {
+      if (player.championId > 0) {
+        unavailable.add(player.championId);
+      }
+    });
+
+    return unavailable;
+  }, [session, bansFromActions]);
+
+  const filteredChampions = useMemo(() => {
+    const filtered = [...champions]
+      .filter((champ) =>
+        champ.name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!searchTerm || "none".includes(searchTerm.toLowerCase())) {
+      return [NONE_CHAMPION, ...filtered];
+    }
+    return filtered;
+  }, [champions, searchTerm]);
+
   useEffect(() => {
     invoke<Champion[]>("get_all_champions")
         .then(setChampions)
@@ -174,8 +216,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const getChamp = (id: number) => championsMap.get(id) || null;
 
   const handleSelectChampion = async (champion: Champion) => {
-    // Allow hovering during planning/finalization phase or when it's your turn
-
+    if (champion.name !== "none" && unavailableChampionIds.has(champion.numeric_id)) {
+      return;
+    }
 
     setStagedChampion(champion);
 
@@ -193,6 +236,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const handleConfirm = async () => {
     if (!currentAction.isMyTurn || !stagedChampion) return;
 
+    if (stagedChampion.name === "none") return;
+
     try {
       if (currentAction.type === "pick") {
         await invoke("lock_champion");
@@ -204,10 +249,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       console.error("Failed to lock:", err);
     }
   };
-
-  const filteredChampions = champions.filter((c) =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const getPhaseText = () => {
     const phase = currentAction.phase;
@@ -238,14 +279,15 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   };
 
   const getConfirmButtonColor = () => {
-    if (currentAction.type === "ban") {
-      return stagedChampion
-          ? "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]"
-          : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
+    //if no champion or "none" is selected
+    if (!stagedChampion || stagedChampion.name === "none") {
+      return "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
     }
-    return stagedChampion
-        ? "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]"
-        : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
+
+    if (currentAction.type === "ban") {
+      return "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]";
+    }
+    return "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]";
   };
 
   return (
@@ -323,10 +365,12 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           <div className="flex flex-col gap-5 w-[220px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
+              const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
                   <PickSlot
                       key={i}
                       pick={getChamp(player.championId || player.championPickIntent)}
+                      ban={banId ? getChamp(banId) : null}
                       index={i}
                       team="blue"
                       playerName={isCurrentPlayer ? "YOU" : (player.gameName || `Player ${i + 1}`)}
@@ -351,7 +395,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                     <ChampionCard
                         key={champ.id}
                         champion={champ}
-                        isSelected={false}
+                        isSelected={champ.name !== "none" && unavailableChampionIds.has(champ.numeric_id)}
                         isStaged={stagedChampion?.id === champ.id}
                         onSelect={(c) => handleSelectChampion(c)}
                     />
@@ -360,9 +404,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
             <button
                 onClick={handleConfirm}
-                disabled={!stagedChampion || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
+                disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
                 className={`w-full py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
-                    stagedChampion && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
+                    stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
                         : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
                 }`}
@@ -372,15 +416,19 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
 
           <div className="flex flex-col gap-5 w-[220px]">
-            {theirTeam.map((player: any, i: number) => (
-                <PickSlot
-                    key={i}
-                    pick={getChamp(player.championId || player.championPickIntent)}
-                    index={i}
-                    team="red"
-                    playerName={`Enemy ${i + 1}`}
-                />
-            ))}
+            {theirTeam.map((player: any, i: number) => {
+              const banId = bansFromActions.cellIdToBan.get(player.cellId);
+              return (
+                  <PickSlot
+                      key={i}
+                      pick={getChamp(player.championId || player.championPickIntent)}
+                      ban={banId ? getChamp(banId) : null}
+                      index={i}
+                      team="red"
+                      playerName={`Enemy ${i + 1}`}
+                  />
+              );
+            })}
           </div>
         </div>
       </div>
