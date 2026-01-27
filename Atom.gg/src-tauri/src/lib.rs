@@ -348,7 +348,7 @@ pub fn run() {
             lcu::hover_ban,
             lcu::lock_ban,
             lcu::is_lcu_available,
-            lcu::get_champ_select_session
+            lcu::get_champ_select_session,
             get_team_players,
             ml_init,
             ml_set_sides,
@@ -433,6 +433,7 @@ mod tests {
         let aatrox = ChampionShort {
             name: aatrox_data.name.clone(),
             id: aatrox_data.id.clone(),
+            numeric_id: aatrox_data.key.parse::<i32>().unwrap_or(0),
             icon: get_champion_icon(aatrox_data.id.clone()),
             splash: get_champion_splash(aatrox_data.id.clone()),
         };
