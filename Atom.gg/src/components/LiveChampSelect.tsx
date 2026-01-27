@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion } from "../types/draft";
+import type { MlRecommendation, MlResponse, MlRole, MlSuggestPayload } from "../types/ml";
 import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
@@ -18,6 +19,8 @@ interface CurrentAction {
   phase: string;
 }
 
+const ALL_ROLES: MlRole[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+
 export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [champions, setChampions] = useState<Champion[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -26,11 +29,42 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [stagedChampion, setStagedChampion] = useState<Champion | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
+  const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
+  const [mlSuggest, setMlSuggest] = useState<MlSuggestPayload | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
+
+  const mlInitializedRef = useRef(false);
+  const processedActionKeysRef = useRef<Set<string>>(new Set());
+  const sentBluePickIdsRef = useRef<Set<number>>(new Set());
+  const sentRedPickIdsRef = useRef<Set<number>>(new Set());
+  const sentBanIdsRef = useRef<Set<number>>(new Set());
+  const lastSuggestKeyRef = useRef<string>("");
+  const lastSuggestAtRef = useRef<number>(0);
+
   const championsMap = useMemo(() => {
     const map = new Map<number, Champion>();
     champions.forEach((c) => map.set(c.numeric_id, c));
     return map;
   }, [champions]);
+
+  const championById = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [champions]);
+
+  const championByName = useMemo(() => {
+    const map = new Map<string, Champion>();
+    champions.forEach((c) => map.set(c.name, c));
+    return map;
+  }, [champions]);
+
+  const resolveChampion = useCallback(
+    (mlChampionKey: string): Champion | undefined => {
+      return championById.get(mlChampionKey) ?? championByName.get(mlChampionKey);
+    },
+    [championById, championByName]
+  );
 
   const bansFromActions = useMemo(() => {
     if (!session) return { myTeamBans: [], theirTeamBans: [] };
@@ -124,6 +158,83 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     };
   }, [session, currentTime]);
 
+  const myAssignedRole = useMemo<MlRole | null>(() => {
+    if (!session) return null;
+
+    const localCellId = session.localPlayerCellId;
+    const me = (session.myTeam || []).find((p: any) => p?.cellId === localCellId);
+    const raw = (me?.assignedRole ?? me?.assignedPosition ?? me?.position ?? me?.role ?? "") as string;
+    const v = String(raw).toLowerCase();
+
+    if (!v) return null;
+    if (v.includes("top")) return "TOP";
+    if (v.includes("jungle") || v === "jg") return "JUNGLE";
+    if (v.includes("mid") || v.includes("middle")) return "MIDDLE";
+    if (v.includes("bot") || v.includes("bottom") || v.includes("adc")) return "BOTTOM";
+    if (v.includes("sup") || v.includes("support") || v.includes("utility")) return "UTILITY";
+    return null;
+  }, [session]);
+
+  const lockedNumericIds = useMemo(() => {
+    const set = new Set<number>();
+    if (!session) return set;
+
+    // Locked picks (championId is present once locked)
+    const myTeam = session.myTeam || [];
+    const theirTeam = session.theirTeam || [];
+    for (const p of [...myTeam, ...theirTeam]) {
+      if (typeof p?.championId === "number" && p.championId > 0) set.add(p.championId);
+    }
+
+    // Locked bans come from completed ban actions
+    const actions = session.actions || [];
+    for (const group of actions) {
+      if (!Array.isArray(group)) continue;
+      for (const action of group) {
+        if (action?.type === "ban" && action?.completed && typeof action?.championId === "number" && action.championId > 0) {
+          set.add(action.championId);
+        }
+      }
+    }
+
+    return set;
+  }, [session]);
+
+  const showRecommendations =
+    currentAction.isMyTurn &&
+    (currentAction.type === "pick" || currentAction.type === "ban") &&
+    currentAction.phase !== "PLANNING" &&
+    currentAction.phase !== "FINALIZATION";
+
+  // Default the role filter to the player's assigned role (once we know it).
+  useEffect(() => {
+    if (!myAssignedRole) return;
+    setSelectedRole((prev) => (prev === "ALL" ? myAssignedRole : prev));
+  }, [myAssignedRole]);
+
+  const visibleRecommendations = useMemo(() => {
+    if (!mlSuggest) return [] as Array<{ rec: MlRecommendation; champ?: Champion }>;
+    const recommendationsMap = (mlSuggest.recommendations ?? {}) as Record<string, MlRecommendation[]>;
+
+    let recs: MlRecommendation[] = [];
+    if (selectedRole === "ALL") {
+      const all = Object.values(recommendationsMap).flat();
+      const unique = new Map<string, MlRecommendation>();
+      all
+        .sort((a, b) => b.score - a.score)
+        .forEach((r) => {
+          if (!unique.has(r.champion)) unique.set(r.champion, r);
+        });
+      recs = Array.from(unique.values()).sort((a, b) => b.score - a.score);
+    } else {
+      recs = recommendationsMap[selectedRole] ?? [];
+    }
+
+    return recs
+      .map((rec) => ({ rec, champ: resolveChampion(rec.champion) }))
+      .filter(({ champ }) => !champ || !lockedNumericIds.has(champ.numeric_id));
+  }, [mlSuggest, selectedRole, resolveChampion, lockedNumericIds]);
+
   useEffect(() => {
     invoke<Champion[]>("get_all_champions")
         .then(setChampions)
@@ -147,11 +258,183 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         setError(null);
       } catch (err) {
         setError("Not in champion select or LCU disconnected");
+        setSession(null);
       }
     }, 500);
 
     return () => clearInterval(interval);
   }, []);
+
+  const getChamp = useCallback(
+    (id: number) => {
+      return championsMap.get(id) || null;
+    },
+    [championsMap]
+  );
+
+  // Reset ML/session-derived caches when we lose session.
+  useEffect(() => {
+    if (session) return;
+    mlInitializedRef.current = false;
+    processedActionKeysRef.current = new Set();
+    sentBluePickIdsRef.current = new Set();
+    sentRedPickIdsRef.current = new Set();
+    sentBanIdsRef.current = new Set();
+    lastSuggestKeyRef.current = "";
+    lastSuggestAtRef.current = 0;
+    setMlSuggest(null);
+    setMlError(null);
+  }, [session]);
+
+  const initMlIfNeeded = useCallback(async () => {
+    if (!session) return;
+    if (mlInitializedRef.current) return;
+
+    try {
+      await invoke("ml_init", {
+        config: {
+          team1: "",
+          team2: "",
+          isTeam1Blue: true,
+          mode: "Normal",
+          numGames: 1,
+        },
+      });
+      mlInitializedRef.current = true;
+      setMlError(null);
+    } catch (e: any) {
+      setMlError(e?.toString?.() ?? "Failed to init ML");
+    }
+  }, [session]);
+
+  const syncDraftToMlAndMaybeSuggest = useCallback(async () => {
+    if (!session) return;
+    if (champions.length === 0) return;
+
+    await initMlIfNeeded();
+    if (!mlInitializedRef.current) return;
+
+    try {
+      const actions = session.actions || [];
+
+      // Prefer `isAllyAction` when present; otherwise fall back to myTeam cellIds.
+      const myTeamCellIds = new Set((session.myTeam || []).map((p: any) => p.cellId));
+
+      const newlyCompleted: Array<{ key: string; type: "pick" | "ban"; isAlly: boolean; championId: number }> = [];
+
+      for (let groupIndex = 0; groupIndex < actions.length; groupIndex++) {
+        const group = actions[groupIndex];
+        if (!Array.isArray(group)) continue;
+
+        for (const action of group) {
+          const t = action?.type;
+          if (t !== "pick" && t !== "ban") continue;
+          if (!action?.completed) continue;
+          const champId = Number(action?.championId ?? 0);
+          if (!Number.isFinite(champId) || champId <= 0) continue;
+
+          const rawKey = action?.id ?? `${groupIndex}-${action?.actorCellId}-${t}-${champId}`;
+          const key = String(rawKey);
+          if (processedActionKeysRef.current.has(key)) continue;
+
+          const isAlly =
+            typeof action?.isAllyAction === "boolean" ? action.isAllyAction : myTeamCellIds.has(action?.actorCellId);
+
+          newlyCompleted.push({ key, type: t, isAlly, championId: champId });
+        }
+      }
+
+      // Apply in order so ML state matches the real timeline.
+      for (const a of newlyCompleted) {
+        const champ = getChamp(a.championId);
+        if (!champ) continue;
+
+        if (a.type === "ban") {
+          if (!sentBanIdsRef.current.has(a.championId)) {
+            await invoke("ml_ban", { champion: champ.id });
+            sentBanIdsRef.current.add(a.championId);
+          }
+        } else {
+          const sentSet = a.isAlly ? sentBluePickIdsRef.current : sentRedPickIdsRef.current;
+          if (!sentSet.has(a.championId)) {
+            await invoke("ml_pick", { side: a.isAlly ? "blue" : "red", champion: champ.id });
+            sentSet.add(a.championId);
+          }
+        }
+
+        processedActionKeysRef.current.add(a.key);
+      }
+
+      // Fallback sync: ensure we include all currently locked picks even if LCU actions are missing.
+      for (const p of session.myTeam || []) {
+        const champId = Number(p?.championId ?? 0);
+        if (!Number.isFinite(champId) || champId <= 0) continue;
+        if (sentBluePickIdsRef.current.has(champId)) continue;
+        const champ = getChamp(champId);
+        if (!champ) continue;
+        await invoke("ml_pick", { side: "blue", champion: champ.id });
+        sentBluePickIdsRef.current.add(champId);
+      }
+
+      for (const p of session.theirTeam || []) {
+        const champId = Number(p?.championId ?? 0);
+        if (!Number.isFinite(champId) || champId <= 0) continue;
+        if (sentRedPickIdsRef.current.has(champId)) continue;
+        const champ = getChamp(champId);
+        if (!champ) continue;
+        await invoke("ml_pick", { side: "red", champion: champ.id });
+        sentRedPickIdsRef.current.add(champId);
+      }
+
+      // Fallback sync: ensure all completed bans are sent.
+      for (const id of [...(bansFromActions?.myTeamBans ?? []), ...(bansFromActions?.theirTeamBans ?? [])]) {
+        const banId = Number(id);
+        if (!Number.isFinite(banId) || banId <= 0) continue;
+        if (sentBanIdsRef.current.has(banId)) continue;
+        const champ = getChamp(banId);
+        if (!champ) continue;
+        await invoke("ml_ban", { champion: champ.id });
+        sentBanIdsRef.current.add(banId);
+      }
+
+      if (!showRecommendations) return;
+
+      const analyzeSide = currentAction.type === "ban" ? "RED" : "BLUE";
+      const isBanMode = currentAction.type === "ban";
+      const suggestKey = `${analyzeSide}-${isBanMode}-${processedActionKeysRef.current.size}-${selectedRole}`;
+
+      const now = Date.now();
+      const shouldThrottle = now - lastSuggestAtRef.current < 750;
+      const isSameKey = suggestKey === lastSuggestKeyRef.current;
+      if (shouldThrottle && isSameKey) return;
+
+      // Personalization: if we know the player's role and the UI isn't on ALL, ask ML only for that role.
+      // This makes bans feel role-targeted (enemy lane threats) and picks feel role-targeted.
+      const roles = selectedRole !== "ALL" ? [selectedRole] : ALL_ROLES;
+
+      const res = (await invoke("ml_suggest", {
+        targetSide: analyzeSide,
+        isBanMode,
+        roles,
+      })) as MlResponse;
+
+      if (!res.ok) {
+        setMlError(res.error ?? "ML error");
+        return;
+      }
+
+      lastSuggestAtRef.current = now;
+      lastSuggestKeyRef.current = suggestKey;
+      setMlError(null);
+      setMlSuggest(res.payload as MlSuggestPayload);
+    } catch (e: any) {
+      setMlError(e?.toString?.() ?? "Failed to sync with ML");
+    }
+  }, [session, champions.length, initMlIfNeeded, getChamp, showRecommendations, currentAction.type, selectedRole, bansFromActions]);
+
+  useEffect(() => {
+    void syncDraftToMlAndMaybeSuggest();
+  }, [syncDraftToMlAndMaybeSuggest]);
 
   if (!session && !error) {
     return (
@@ -170,8 +453,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   const myTeam = session.myTeam || [];
   const theirTeam = session.theirTeam || [];
-
-  const getChamp = (id: number) => championsMap.get(id) || null;
 
   const handleSelectChampion = async (champion: Champion) => {
     // Allow hovering during planning/finalization phase or when it's your turn
@@ -208,6 +489,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const filteredChampions = champions.filter((c) =>
       c.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const suggestTitle = currentAction.type === "ban" ? "Ban Suggestions" : "Pick Suggestions";
 
   const getPhaseText = () => {
     const phase = currentAction.phase;
@@ -336,28 +619,145 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
 
           <div className="flex-1 flex flex-col gap-5 min-w-0">
-            <div className="flex flex-col items-end gap-3">
-              <input
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {showRecommendations ? (
+                  <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs truncate">
+                    {suggestTitle}
+                  </div>
+                ) : (
+                  <div className="text-[#444] font-black uppercase tracking-[0.25em] text-xs truncate">
+                    Champion Pool
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
                   type="text"
                   placeholder="Search champion..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className={`w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest`}
-              />
-            </div>
-            <div className={`flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner `}>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
-                {filteredChampions.map((champ) => (
-                    <ChampionCard
-                        key={champ.id}
-                        champion={champ}
-                        isSelected={false}
-                        isStaged={stagedChampion?.id === champ.id}
-                        onSelect={(c) => handleSelectChampion(c)}
-                    />
-                ))}
+                />
+
+                {showRecommendations && (
+                  <button
+                    onClick={() => {
+                      lastSuggestKeyRef.current = "";
+                      lastSuggestAtRef.current = 0;
+                      void syncDraftToMlAndMaybeSuggest();
+                    }}
+                    className="h-[40px] px-4 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+                  >
+                    Refresh
+                  </button>
+                )}
               </div>
             </div>
+
+            <div className="flex gap-5 flex-1 min-h-0">
+              <div className={`${showRecommendations ? "flex-[2]" : "flex-1"} border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner`}>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
+                  {filteredChampions.map((champ) => (
+                    <ChampionCard
+                      key={champ.id}
+                      champion={champ}
+                      isSelected={lockedNumericIds.has(champ.numeric_id)}
+                      isStaged={stagedChampion?.id === champ.id}
+                      onSelect={(c) => handleSelectChampion(c)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {showRecommendations && (
+                <div className="w-[360px] border-2 border-[#333] bg-[#1a1a1a] rounded-lg shadow-inner flex flex-col min-h-0">
+                  <div className="p-4 border-b border-[#333]">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-black uppercase tracking-widest text-[#444]">
+                        ML: {(mlSuggest?.target_side ?? (currentAction.type === "ban" ? "RED" : "BLUE"))} {currentAction.type === "ban" ? "BAN" : "PICK"}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-widest text-[#666]">
+                        Role
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      {(["ALL", ...ALL_ROLES] as MlRole[]).map((role) => (
+                        <button
+                          key={role}
+                          onClick={() => setSelectedRole(role)}
+                          className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all ${
+                            selectedRole === role
+                              ? "bg-[#3498db] border-[#3498db] text-white"
+                              : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                          }`}
+                        >
+                          {role === "MIDDLE" ? "MID" : role === "BOTTOM" ? "ADC" : role === "UTILITY" ? "SUP" : role}
+                        </button>
+                      ))}
+                    </div>
+
+                    {mlError && (
+                      <div className="mt-3 text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
+                        {mlError}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-4 flex-1 overflow-y-auto no-scrollbar">
+                    {mlSuggest ? (
+                      <div className="flex flex-col gap-2">
+                        {visibleRecommendations.slice(0, 12).map(({ rec, champ }) => (
+                          <div
+                            key={`${selectedRole}-${rec.champion}`}
+                            className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
+                            onClick={() => {
+                              if (!champ) return;
+                              setStagedChampion(champ);
+                              void handleSelectChampion(champ);
+                            }}
+                          >
+                            {champ ? (
+                              <img src={champ.icon} alt={champ.name} className="w-10 h-10 border border-[#333]" />
+                            ) : (
+                              <div className="w-10 h-10 border border-[#333] bg-[#222]" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="truncate font-black uppercase tracking-wide text-sm">
+                                  {champ ? champ.name : rec.champion}
+                                </div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
+                                  {(rec.score * 100).toFixed(1)}%
+                                </div>
+                              </div>
+                              {rec.tactical && (
+                                <div className="text-[10px] text-[#aaa] mt-1 leading-snug">
+                                  {rec.tactical}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+
+                        {visibleRecommendations.length === 0 && (
+                          <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
+                            No recommendations
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
+                        Waiting for ML...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
                 onClick={handleConfirm}
                 disabled={!stagedChampion || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
