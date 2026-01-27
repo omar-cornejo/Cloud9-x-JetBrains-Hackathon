@@ -2,12 +2,13 @@ import { Champion } from "../types/draft";
 
 interface PickSlotProps {
   pick: Champion | null;
+  ban?: Champion | null;
   index: number;
   team: "blue" | "red";
   playerName?: string;
 }
 
-export function PickSlot({ pick, index, team, playerName }: PickSlotProps) {
+export function PickSlot({ pick, ban, index, team, playerName }: PickSlotProps) {
   const isBlue = team === "blue";
   const borderClass = isBlue ? "border-l-[#3498db] border-l-[5px]" : "border-r-[#e74c3c] border-r-[5px]";
 
@@ -15,6 +16,19 @@ export function PickSlot({ pick, index, team, playerName }: PickSlotProps) {
     <div
       className={`h-[100px] border-2 border-[#333] bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative overflow-hidden group transition-all`}
     >
+      {ban && (
+        <div className={`absolute bottom-1 ${isBlue ? 'left-2' : 'right-2'} z-20`}>
+          <div className="relative w-6 h-6 border-2 border-[#e74c3c] rounded-full overflow-hidden bg-[#1a1a1a] shadow-lg transform group-hover:scale-110 transition-transform duration-300">
+            <img
+              src={ban.icon}
+              alt={`Banned ${ban.name}`}
+              className="w-full h-full object-cover grayscale opacity-60"
+            />
+            <div className="ab solute inset-0 bg-gradient-to-tr from-transparent via-[#e74c3c]/80 to-transparent w-full h-[2px] top-1/2 left-0 -rotate-45 transform origin-center" />
+          </div>
+        </div>
+      )}
+
       {pick ? (
         <>
           <img

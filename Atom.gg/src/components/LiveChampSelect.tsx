@@ -34,13 +34,14 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }, [champions]);
 
   const bansFromActions = useMemo(() => {
-    if (!session) return { myTeamBans: [], theirTeamBans: [] };
+    if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
 
     const myTeam = session.myTeam || [];
     const actions = session.actions || [];
 
     const myTeamBans: number[] = [];
     const theirTeamBans: number[] = [];
+    const cellIdToBan = new Map<number, number>();
 
     //cell IDs from my team
     const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
@@ -49,18 +50,23 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     for (const group of actions) {
       if (Array.isArray(group)) {
         for (const action of group) {
-          if (action.type === "ban" && action.completed && action.championId > 0) {
-            if (myTeamCellIds.has(action.actorCellId)) {
-              myTeamBans.push(action.championId);
-            } else {
-              theirTeamBans.push(action.championId);
+          if (action.type === "ban" && action.championId > 0) {
+            // Track the latest ban action for each cellId (hovered or completed)
+            cellIdToBan.set(action.actorCellId, action.championId);
+
+            if (action.completed) {
+              if (myTeamCellIds.has(action.actorCellId)) {
+                myTeamBans.push(action.championId);
+              } else {
+                theirTeamBans.push(action.championId);
+              }
             }
           }
         }
       }
     }
 
-    return { myTeamBans, theirTeamBans };
+    return { myTeamBans, theirTeamBans, cellIdToBan };
   }, [session]);
 
   const currentAction = useMemo((): CurrentAction => {
@@ -359,10 +365,12 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           <div className="flex flex-col gap-5 w-[220px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
+              const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
                   <PickSlot
                       key={i}
                       pick={getChamp(player.championId || player.championPickIntent)}
+                      ban={banId ? getChamp(banId) : null}
                       index={i}
                       team="blue"
                       playerName={isCurrentPlayer ? "YOU" : (player.gameName || `Player ${i + 1}`)}
@@ -408,15 +416,19 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
 
           <div className="flex flex-col gap-5 w-[220px]">
-            {theirTeam.map((player: any, i: number) => (
-                <PickSlot
-                    key={i}
-                    pick={getChamp(player.championId || player.championPickIntent)}
-                    index={i}
-                    team="red"
-                    playerName={`Enemy ${i + 1}`}
-                />
-            ))}
+            {theirTeam.map((player: any, i: number) => {
+              const banId = bansFromActions.cellIdToBan.get(player.cellId);
+              return (
+                  <PickSlot
+                      key={i}
+                      pick={getChamp(player.championId || player.championPickIntent)}
+                      ban={banId ? getChamp(banId) : null}
+                      index={i}
+                      team="red"
+                      playerName={`Enemy ${i + 1}`}
+                  />
+              );
+            })}
           </div>
         </div>
       </div>
