@@ -14,17 +14,16 @@ export function PickSlot({ pick, ban, index, team, playerName }: PickSlotProps) 
 
   return (
     <div
-      className={`h-[100px] border-2 border-[#333] bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative overflow-hidden group transition-all`}
+      className={`h-[100px] border-2 border-[#333] bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative group transition-all`}
     >
       {ban && (
-        <div className={`absolute bottom-1 ${isBlue ? 'left-2' : 'right-2'} z-20`}>
-          <div className="relative w-6 h-6 border-2 border-[#e74c3c] rounded-full overflow-hidden bg-[#1a1a1a] shadow-lg transform group-hover:scale-110 transition-transform duration-300">
+        <div className={`absolute bottom-0 ${isBlue ? 'right-0 translate-x-1/2 translate-y-1/2' : 'left-0 -translate-x-1/2 translate-y-1/2'} z-20`}>
+          <div className="relative w-9 h-9 border-2 border-[#e74c3c] rounded-full overflow-hidden bg-[#1a1a1a] shadow-lg transform group-hover:scale-110 transition-transform duration-300">
             <img
               src={ban.icon}
               alt={`Banned ${ban.name}`}
               className="w-full h-full object-cover grayscale opacity-60"
             />
-            <div className="ab solute inset-0 bg-gradient-to-tr from-transparent via-[#e74c3c]/80 to-transparent w-full h-[2px] top-1/2 left-0 -rotate-45 transform origin-center" />
           </div>
         </div>
       )}
