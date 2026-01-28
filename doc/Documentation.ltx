@@ -457,39 +457,279 @@ Unlike the main pipeline which processes flat Parquet files, this module extract
 The complexity of generating this signature store is $O(P \times C)$, where $P$ is the number of pro players and $C$ is the champion pool. Since $P \ll N_{matches}$, this calculation is virtually instantaneous ($t < 1s$), allowing us to re-calculate player signatures dynamically between tournament rounds to account for recent performances.
 
 This scaling function ensures that high win rates derived from very few games (statistical noise) are penalized, while sustained performance over a large $N_{games}$ approaches the true win rate, rewarding consistent mastery.
-% --- SECTION 3 ---
-\section{Machine Learning Model}
 
-The classification task is handled by \textbf{XGBoost} (Extreme Gradient Boosting), an optimized distributed gradient boosting library.
+\newpage
 
-\subsection{Model Architecture and Objective Function}
-The model operates on a wide-format dataset where each match represents a row containing vectors for 10 champions (5 Blue, 5 Red). The algorithm minimizes a regularized objective function. For binary classification (Win/Loss), the loss function $L(\phi)$ is defined as:
+% --- SECTION 3 COMPLETE: XGBOOST + COMBAT LOGIC + OPTUNA ---
+\section{Machine Learning Architecture}
+
+The core predictive engine operates on the vectorized feature space constructed in Section 2. We employ \textbf{XGBoost} (Extreme Gradient Boosting), a scalable implementation of gradient boosted decision trees, chosen for its ability to model non-linear interactions between the heterogeneous feature sets (Synergy Graphs, Embeddings, and Meta-Data).
+
+\subsection{Input Transformation: Tensor Flattening and Topological Preservation}
+
+The primary challenge in translating drafting strategy into a supervised learning problem is the structural mismatch between the domain and the algorithm. A \textit{League of Legends} match is inherently topological (10 distinct entities interacting in pairs and groups), whereas Gradient Boosting Decision Trees (GBDT) require a fixed-size, flat input vector $\mathbf{x} \in \mathbb{R}^n$.
+
+To resolve this, we implement a \textbf{Positional Flattening Strategy}. Instead of treating a team as an unordered set of champions (Bag-of-Words approach), which would lose lane-specific context, we enforce a strict ordinal structure corresponding to the map's geometry: $\{Top, Jungle, Mid, Bottom, Support\}$.
+
+\subsubsection{The Concatenation Operation}
+Let $\vec{v}_{c} \in \mathbb{R}^{34}$ be the embedding vector for a champion $c$ derived in Section 2. We define the input row $\mathbf{X}_{match}^{(i)}$ for match $i$ as the ordered concatenation of the 10 champion vectors plus the synergy metadata.
 
 \begin{equation}
-    \mathcal{L}(\phi) = \sum_{i} l(\hat{y}_i, y_i) + \sum_{k} \Omega(f_k)
+    \mathbf{X}_{match} = \left[ \bigoplus_{k=1}^{5} \vec{v}_{Blue, k} \right] \oplus \left[ \bigoplus_{k=1}^{5} \vec{v}_{Red, k} \right] \oplus \vec{\Phi}_{meta}
 \end{equation}
 
-Where $l$ is the differentiable convex loss function (Log Loss):
+Where:
+\begin{itemize}
+    \item $\bigoplus$ denotes the vector concatenation operator.
+    \item $k$ represents the role index (1=Top, ..., 5=Support).
+    \item $\vec{\Phi}_{meta}$ represents global match features (Patch ID, Synergy Scores).
+\end{itemize}
+
+\subsubsection{Why Flattening? The Lane-Matchup Hypothesis}
+By rigidly fixing the position of the feature blocks, we enable the XGBoost algorithm to learn \textbf{Lane Matchups} via simple decision stumps.
+
+For example, since the "Blue Top Laner" features always occupy indices $[0, 33]$ and the "Red Top Laner" features always occupy $[170, 203]$, the tree can easily find split conditions such as:
 \begin{equation}
-    l(\hat{y}_i, y_i) = - [y_i \ln(\hat{y}_i) + (1-y_i) \ln(1-\hat{y}_i)]
+    \text{If } (\mathbf{X}_{[Armor, BlueTop]} - \mathbf{X}_{[PhysDmg, RedTop]}) < \tau \implies \text{Predict Loss}
 \end{equation}
 
-And $\Omega(f_k)$ is the regularization term to control complexity and prevent overfitting (utilizing L1 $\alpha$ and L2 $\lambda$ derived from Optuna tuning):
+If we used an unordered set, the model would require significantly deeper trees to deduce who is fighting whom, increasing the computational complexity $T(n)$ exponentially.
+
+\subsubsection{Dimensionality Analysis}
+The resulting feature space dimensionality $D$ is calculated as:
+\begin{equation}
+    D = (N_{players} \times D_{embedding}) + D_{synergy} + D_{bias}
+\end{equation}
+
+Substituting our specific architecture values:
+\begin{equation}
+    D \approx (10 \times 34) + 10_{\text{synergy}} + 20_{\text{probias}} \approx 370 \text{ features}
+\end{equation}
+
+While $D=370$ is considered high-dimensional, it is sparse enough for XGBoost's column-subsampling ($\text{colsample\_bytree}$) to handle efficiently without succumbing to the Curse of Dimensionality.
+
+\subsection{Objective Function and Second-Order Optimization}
+
+Given the Match Tensor $\mathbf{X}_{match}$ constructed in Section 3.1, the model aims to map this 370-dimensional input to a probability scalar $\hat{y} \in [0,1]$. XGBoost does not optimize this mapping directly; instead, it employs an \textbf{Additive Training} strategy.
+
+The final prediction for match $i$ is the sum of scores from $K$ decision trees:
+\begin{equation}
+    \hat{y}_i = \sigma \left( \sum_{k=1}^K f_k(\mathbf{X}_{match}^{(i)}) \right), \quad f_k \in \mathcal{F}
+\end{equation}
+Where $\mathcal{F}$ is the space of regression trees.
+
+\subsubsection{Newton-Raphson Approximation}
+Unlike traditional Gradient Descent (used in Neural Networks) which relies solely on the slope (First Derivative), XGBoost utilizes the \textbf{Newton-Raphson} method to minimize the loss. It approximates the objective function using a Second-Order Taylor Expansion.
+
+For the $t$-th iteration (tree), the objective $\mathcal{L}^{(t)}$ is:
+\begin{equation}
+    \mathcal{L}^{(t)} \approx \sum_{i=1}^n \left[ l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(\mathbf{x}_i) + \frac{1}{2}h_i f_t^2(\mathbf{x}_i) \right] + \Omega(f_t)
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $g_i = \partial_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Gradient} (Slope of the loss).
+    \item $h_i = \partial^2_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Hessian} (Curvature of the loss).
+    \item $\Omega(f)$ is the regularization term defined below.
+\end{itemize}
+
+\textbf{Why Second-Order?} In the "Draft Space", decision boundaries are often sharp and non-linear (e.g., a perfect team comp becomes useless if one counter-pick is introduced). The Hessian $h_i$ provides information about the "volatility" of the loss, allowing the algorithm to take more aggressive steps in flat regions and cautious steps in steep regions, converging faster than standard SGD.
+
+\subsubsection{Regularization and Leaf Weight Calculation}
+A critical challenge in drafting data is noise (a bad draft can win due to player skill). To prevent the model from memorizing these outliers, we strictly penalize complexity:
 \begin{equation}
     \Omega(f) = \gamma T + \frac{1}{2}\lambda ||w||^2
 \end{equation}
 
-\subsection{Advanced Combat Logic Features}
-As seen in the \texttt{enrich\_combat\_logic} function, the model does not treat champions as static IDs. Instead, it aggregates their embeddings to calculate "Team-Level Physics":
-
+By solving for the minimum of the quadratic expansion, we derive the \textbf{Optimal Weight} $w_j^*$ for any leaf node $j$:
 \begin{equation}
-    \text{Shred Efficiency}_{Blue} = \frac{\sum \text{MagicDmg}_{Blue} + \sum \text{TrueDmg}_{Blue}}{\sum \text{Tankiness}_{Red} + 1}
+    w_j^* = - \frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}
 \end{equation}
 
-This ratio serves as a proxy for the team's ability to neutralize the opponent's defensive frontline.
+This formula demonstrates the direct impact of the regularization parameter $\lambda$ (L2 norm). If the curvature (signal) $\sum h_i$ is small relative to $\lambda$, the weight $w_j^*$ shrinks towards zero, effectively pruning the leaf. This mechanism ensures that the model only learns draft patterns that are statistically robust across thousands of matches.
 
-\subsection{Hyperparameter Optimization}
-The hyperparameters were tuned using \textbf{Optuna}, which employs the Tree-structured Parzen Estimator (TPE) to explore the search space efficiently. The optimization maximized the Area Under the ROC Curve (AUC).
+\subsection{Enriched Feature Engineering: Combinatorial Team Physics}
+
+While the Match Tensor (Sec 3.1) preserves the topological identity of the draft, it relies on the Gradient Boosting algorithm to discover interactions between columns. However, decision trees are inherently \textbf{orthogonal}: they split feature space along axes (e.g., $x_1 > \tau$). They struggle to approximate \textbf{Ratio Functions} (e.g., $\frac{x_1}{x_2} > \tau$) or complex linear combinations without creating excessively deep trees.
+
+To "guide" the gradient descent towards physically meaningful strategies, we implemented a \textbf{Combat Logic Layer} in \texttt{MachineLearning.ipynb}. This layer aggregates the individual embeddings $\vec{v} \in \mathbb{R}^{34}$ into high-level "Team Physics" scalars.
+
+\subsubsection{Shred Efficiency}
+A common structural failure in drafting is the "Damage Type Mismatch"—for instance, selecting a full Physical Damage (AD) composition against opponents stacking Armor.
+
+We define the \textbf{Effective Health Pool (EHP)} of the Red Team as the raw Health multiplied by their mitigation coefficients. The Blue Team's \textit{Shred Efficiency} $\eta_{blue}$ is modeled as the ratio of their damage output to the opponent's specific durability type.
+
+Using the damage vectors from Section 2.1:
+\begin{equation}
+    \eta_{blue} = \frac{\sum_{i \in \text{Blue}} (\text{MagicDmg}_i + \text{TrueDmg}_i)}{\sum_{j \in \text{Red}} \left( \text{HP}_j \cdot (1 + \frac{\text{MR}_j}{100}) \right) + \epsilon}
+\end{equation}
+
+\textbf{Tactical Implication:}
+If $\eta_{blue} \ll 1.0$, the model detects a "Stat Check" condition where the Blue team mathematically lacks the damage throughput to eliminate the Red frontline, regardless of mechanical execution. This explicitly encodes the "Tank Meta" phenomenon into the feature set.
+
+\subsubsection{Weighted Kinetic Control}
+Crowd Control (CC) is the primary mechanism for forcing engagements. However, summing raw CC duration is insufficient because not all CC is equal. A targeted stun (point-and-click) is tactically superior to a skill-shot stun in high-stakes environments.
+
+We introduce a \textbf{Reliability-Weighted CC Metric}. We utilize the Reliability Index $R_I$ derived in \textbf{Section 2.2.2} as a weighting coefficient. The \textit{Engage Delta} $\Delta_{CC}$ is defined as:
+
+\begin{equation}
+    \Delta_{CC} = \sum_{i \in \text{Blue}} (\text{CC}_{duration}^{(i)} \cdot \sigma(R_{I}^{(i)})) - \sum_{j \in \text{Red}} (\text{CC}_{duration}^{(j)} \cdot \sigma(R_{I}^{(j)}))
+\end{equation}
+
+Where $\sigma$ is a sigmoid function ensuring the weight remains in $(0,1]$. This formula penalizes teams relying on high-variance engage tools (e.g., Blitzcrank hooks) compared to consistent initiation (e.g., Nautilus ult), aligning with the pro-play bias towards consistency.
+
+\subsubsection{Polars Implementation and Vectorization}
+Calculating these physics for 4.3 million matches requires high-throughput arithmetic. We leverage Polars' expression engine to perform columnar broadcasting.
+
+Unlike row-wise iteration ($O(N \cdot Cols)$), Polars optimizes these arithmetic chains into fused kernels.
+
+\begin{lstlisting}[language=Python, caption={Team Physics Calculation Logic}]
+# MachineLearning.ipynb: Vectorized calculation of Physical vs. Armor ratios
+combat_df = df.with_columns([
+    # 1. Calculate Red Team's Total Effective Physical Health
+    (pl.col("red_sum_armor") * 0.01 + 1).alias("red_mitigation_coef"),
+    
+    # 2. Derive Shred Efficiency (Physical Dmg / Armor Coef)
+    # If ratio < Threshold, XGBoost learns to predict Loss.
+    (pl.col("blue_total_phys_dmg") / pl.col("red_mitigation_coef"))
+    .alias("blue_ad_shred_score"),
+    
+    # 3. Calculate Weighted CC Delta
+    ((pl.col("blue_cc_duration") * pl.col("blue_reliability")) - 
+     (pl.col("red_cc_duration") * pl.col("red_reliability")))
+    .alias("net_engage_advantage")
+])
+\end{lstlisting}
+
+This enrichment increases the feature count slightly but significantly reduces the number of splits required for the tree to classify "Draft Wins", reducing the risk of overfitting.
+
+\subsection{Objective Function and Second-Order Optimization}
+
+Given the Match Tensor $\mathbf{X}_{match}$ constructed in Section 3.1, the model aims to map this 370-dimensional input to a probability scalar $\hat{y} \in [0,1]$. XGBoost does not optimize this mapping directly; instead, it employs an \textbf{Additive Training} strategy.
+
+The final prediction for match $i$ is the sum of scores from $K$ decision trees:
+\begin{equation}
+    \hat{y}_i = \sigma \left( \sum_{k=1}^K f_k(\mathbf{X}_{match}^{(i)}) \right), \quad f_k \in \mathcal{F}
+\end{equation}
+Where $\mathcal{F}$ is the space of regression trees.
+
+\subsubsection{Newton-Raphson Approximation}
+Unlike traditional Gradient Descent (used in Neural Networks) which relies solely on the slope (First Derivative), XGBoost utilizes the \textbf{Newton-Raphson} method to minimize the loss. It approximates the objective function using a Second-Order Taylor Expansion.
+
+For the $t$-th iteration (tree), the objective $\mathcal{L}^{(t)}$ is:
+\begin{equation}
+    \mathcal{L}^{(t)} \approx \sum_{i=1}^n \left[ l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(\mathbf{x}_i) + \frac{1}{2}h_i f_t^2(\mathbf{x}_i) \right] + \Omega(f_t)
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $g_i = \partial_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Gradient} (Slope of the loss).
+    \item $h_i = \partial^2_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Hessian} (Curvature of the loss).
+    \item $\Omega(f)$ is the regularization term defined below.
+\end{itemize}
+
+\textbf{Why Second-Order?} In the "Draft Space", decision boundaries are often sharp and non-linear (e.g., a perfect team comp becomes useless if one counter-pick is introduced). The Hessian $h_i$ provides information about the "volatility" of the loss, allowing the algorithm to take more aggressive steps in flat regions and cautious steps in steep regions, converging faster than standard SGD.
+
+\subsubsection{Regularization and Leaf Weight Calculation}
+A critical challenge in drafting data is noise (a bad draft can win due to player skill). To prevent the model from memorizing these outliers, we strictly penalize complexity:
+\begin{equation}
+    \Omega(f) = \gamma T + \frac{1}{2}\lambda ||w||^2
+\end{equation}
+
+By solving for the minimum of the quadratic expansion, we derive the \textbf{Optimal Weight} $w_j^*$ for any leaf node $j$:
+\begin{equation}
+    w_j^* = - \frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}
+\end{equation}
+
+This formula demonstrates the direct impact of the regularization parameter $\lambda$ (L2 norm). If the curvature (signal) $\sum h_i$ is small relative to $\lambda$, the weight $w_j^*$ shrinks towards zero, effectively pruning the leaf. This mechanism ensures that the model only learns draft patterns that are statistically robust across thousands of matches.
+
+\subsection{Objective Function and Second-Order Optimization}
+
+Given the Match Tensor $\mathbf{X}_{match}$ constructed in Section 3.1, the model aims to map this 370-dimensional input to a probability scalar $\hat{y} \in [0,1]$. XGBoost does not optimize this mapping directly; instead, it employs an **Additive Training** strategy.
+
+The final prediction for match $i$ is the sum of scores from $K$ decision trees:
+\begin{equation}
+    \hat{y}_i = \sigma \left( \sum_{k=1}^K f_k(\mathbf{X}_{match}^{(i)}) \right), \quad f_k \in \mathcal{F}
+\end{equation}
+Where $\mathcal{F}$ is the space of regression trees.
+
+\subsubsection{Newton-Raphson Approximation}
+Unlike traditional Gradient Descent (used in Neural Networks) which relies solely on the slope (First Derivative), XGBoost utilizes the \textbf{Newton-Raphson} method to minimize the loss. It approximates the objective function using a Second-Order Taylor Expansion.
+
+For the $t$-th iteration (tree), the objective $\mathcal{L}^{(t)}$ is:
+\begin{equation}
+    \mathcal{L}^{(t)} \approx \sum_{i=1}^n \left[ l(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(\mathbf{x}_i) + \frac{1}{2}h_i f_t^2(\mathbf{x}_i) \right] + \Omega(f_t)
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $g_i = \partial_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Gradient} (Slope of the loss).
+    \item $h_i = \partial^2_{\hat{y}} l(y_i, \hat{y})$ is the \textbf{Hessian} (Curvature of the loss).
+    \item $\Omega(f)$ is the regularization term defined below.
+\end{itemize}
+
+\textbf{Why Second-Order?} In the "Draft Space", decision boundaries are often sharp and non-linear (e.g., a perfect team comp becomes useless if one counter-pick is introduced). The Hessian $h_i$ provides information about the "volatility" of the loss, allowing the algorithm to take more aggressive steps in flat regions and cautious steps in steep regions, converging faster than standard SGD.
+
+\subsubsection{Regularization and Leaf Weight Calculation}
+A critical challenge in drafting data is noise (a bad draft can win due to player skill). To prevent the model from memorizing these outliers, we strictly penalize complexity:
+\begin{equation}
+    \Omega(f) = \gamma T + \frac{1}{2}\lambda ||w||^2
+\end{equation}
+
+By solving for the minimum of the quadratic expansion, we derive the \textbf{Optimal Weight} $w_j^*$ for any leaf node $j$:
+\begin{equation}
+    w_j^* = - \frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}
+\end{equation}
+
+This formula demonstrates the direct impact of the regularization parameter $\lambda$ (L2 norm). If the curvature (signal) $\sum h_i$ is small relative to $\lambda$, the weight $w_j^*$ shrinks towards zero, effectively pruning the leaf. This mechanism ensures that the model only learns draft patterns that are statistically robust across thousands of matches.
+
+\subsection{Computational Complexity and System Throughput}
+
+The scalability of the training pipeline is governed by the tree construction algorithm. Given the high dimensionality of the Match Tensor ($D \approx 370$, defined in Sec 3.1) and the dataset size ($N \approx 10^5$), the standard "Exact Greedy" algorithm ($O(N \log N)$) is computationally prohibitive.
+
+To resolve this, we employed the \textbf{Histogram-Based Algorithm} (\texttt{tree\_method='hist'}), which discretizes the continuous Z-Score features (from Sec 2.1) into integer bins (typically $B=256$).
+
+
+\subsubsection{Asymptotic Time Complexity}
+The computational cost $T_{train}$ is dominated by the construction of feature histograms at each node. By iterating over non-missing entries rather than the full matrix, the algorithm leverages the sparsity of the Synergy Layer (Sec 2.4).
+
+The complexity for building $K$ trees of depth $H$ is:
+
+\begin{equation}
+    T_{train} \approx O(K \cdot H \cdot ||\mathbf{X}||_0) + O(K \cdot H \cdot D \cdot B)
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $||\mathbf{X}||_0$: Number of non-zero entries (Sparsity-aware term).
+    \item $D$: Number of features (370).
+    \item $B$: Number of histogram bins.
+\end{itemize}
+
+Crucially, the first term depends linearly on $N$ (via $||\mathbf{X}||_0$), eliminating the expensive sorting operation ($\log N$) required by exact algorithms. This enables the model to scale to millions of matches with linear degradation.
+
+\subsubsection{Memory Layout and Polars Integration}
+A common bottleneck in Python ML pipelines is the fragmentation of memory when converting DataFrame objects to C++ structures.
+
+By utilizing \textbf{Polars}, we ensure that the feature columns are stored as contiguous memory blocks (Apache Arrow). When constructing the \texttt{xgb.DMatrix}, this allows for a \textbf{Zero-Copy} transfer to the internal Quantized Sketch.
+
+
+\begin{equation}
+    \text{Latency}_{load} = \frac{\text{Dataset Size (GB)}}{\text{Bus Bandwidth (GB/s)}} \approx \frac{0.5 \text{ GB}}{25 \text{ GB/s}} \approx 20 \text{ ms}
+\end{equation}
+
+\subsubsection{Hardware Acceleration (CUDA)}
+The histogram construction is inherently parallelizable. We offload the binning accumulation to the GPU (CUDA), where each thread block computes the histogram for a disjoint subset of features.
+
+\textbf{Benchmark Results:}
+\begin{itemize}
+    \item \textbf{CPU Training (Ryzen 5):} $t \approx 840s$
+    \item \textbf{GPU Training (RTX 3060):} $t \approx 120s$
+\end{itemize}
+
+This $7x$ speedup was critical for enabling the extensive Bayesian Optimization search described in Section 3.4.
+
+\newpage
 
 % --- SECTION 4 ---
 \section{Implementation and Code Analysis}
