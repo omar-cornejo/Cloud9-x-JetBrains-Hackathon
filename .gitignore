@@ -107,3 +107,6 @@ $RECYCLE.BIN/
 *.msm
 *.msp
 *.lnk
+*.aux
+*.out
+*.toc
