@@ -515,7 +515,7 @@ class TournamentDraft:
             if score > 0.3:
                 bonus = 0.4
                 note = f"Pro GOD ({games}g {wr:.0f}%)"
-            elif games > 25:
+            elif games > 15:
                 bonus = 0.6
                 note = f"Pro Main ({games}g)"
             elif wr < 40 and games > 5:
@@ -829,7 +829,7 @@ class TournamentDraft:
         suggestions.sort(key=lambda s: s.score, reverse=True)
         recs: Dict[str, List[Dict[str, Any]]] = {r: [] for r in open_roles}
         for role in open_roles:
-            role_items = [s for s in suggestions if s.role == role][:10]
+            role_items = [s for s in suggestions if s.role == role][:18]
             recs[role] = [
                 {
                     "champion": s.champion,

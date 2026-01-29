@@ -36,55 +36,51 @@ export function Home({ onSelectMode }: HomeProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)] p-10 font-sans overflow-hidden">
-      <div className="flex flex-col items-center gap-4 mb-20">
-        <h1 className="text-9xl font-black text-center uppercase tracking-tighter text-white drop-shadow-[0_0_40px_rgba(0,209,255,0.3)]">
-          Atom<span className="text-[var(--accent-blue)]">.gg</span>
+    <div className="flex flex-col items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)] p-6 font-sans overflow-hidden">
+      <div className="flex flex-col items-center gap-3 mb-12">
+        <h1 className="text-7xl font-black text-center uppercase tracking-tighter text-white">
+          Atom<span className="text-[var(--brand-primary)]">.gg</span>
         </h1>
-        <div className="h-2 w-36 bg-[var(--accent-blue)] rounded-full shadow-[0_0_20px_rgba(0,209,255,0.6)]" />
+        <div className="h-1.5 w-24 bg-[var(--brand-primary)] rounded-full" />
       </div>
 
-      <div className="flex flex-col gap-8 w-full max-w-lg">
+      <div className="flex flex-col gap-6 w-full max-w-md">
         <button
           onClick={() => onSelectMode("simulator")}
-          className="group relative bg-[var(--surface-color)] hover:bg-[var(--surface-color-hover)] border-2 border-[var(--border-color)] hover:border-[var(--accent-blue)] p-10 rounded-3xl transition-all duration-300 transform hover:scale-[1.05] active:scale-[0.98] shadow-2xl overflow-hidden"
+          className="group relative bg-[var(--surface-color)] hover:bg-[var(--surface-color-hover)] border-2 border-[var(--border-color)] hover:border-[var(--brand-primary)] p-6 rounded-2xl transition-all duration-300 transform active:scale-[0.98] shadow-lg overflow-hidden"
         >
-          <div className="relative z-10 flex flex-col items-center gap-3">
-            <span className="text-3xl font-black uppercase tracking-tight text-white group-hover:text-[var(--accent-blue)] transition-colors">
+          <div className="relative z-10 flex flex-col items-center gap-2">
+            <span className="text-2xl font-black uppercase tracking-tight text-white group-hover:text-[var(--brand-primary)] transition-colors">
               Draft Simulator
             </span>
-            <span className="text-[12px] font-black uppercase tracking-[0.4em] text-[var(--text-muted)] group-hover:text-white transition-colors opacity-60">
+            <span className="text-[11px] font-black uppercase tracking-[0.3em] text-[var(--text-muted)] group-hover:text-white transition-colors opacity-60">
               Professional Training Tool
             </span>
           </div>
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] transition-transform" />
         </button>
 
         <div className="relative">
           <button
             onClick={handleClientClick}
-            className={`group relative w-full border-2 p-10 rounded-3xl transition-all duration-300 transform shadow-2xl overflow-hidden ${
+            className={`group relative w-full border-2 p-6 rounded-2xl transition-all duration-300 transform shadow-lg overflow-hidden ${
               isLcuAvailable 
-                ? "bg-[var(--surface-color)] hover:bg-[var(--surface-color-hover)] border-[var(--border-color)] hover:border-[var(--accent-blue)] hover:scale-[1.05] active:scale-[0.98]" 
+                ? "bg-[var(--surface-color)] hover:bg-[var(--surface-color-hover)] border-[var(--border-color)] hover:border-[var(--brand-primary)] active:scale-[0.98]" 
                 : "bg-[var(--surface-color)]/50 border-[var(--border-color)] cursor-not-allowed opacity-60"
             }`}
           >
-            <div className="relative z-10 flex flex-col items-center gap-3">
-              <span className={`text-3xl font-black uppercase tracking-tight transition-colors ${isLcuAvailable ? "text-white group-hover:text-[var(--accent-blue)]" : "text-[var(--text-muted)]"}`}>
+            <div className="relative z-10 flex flex-col items-center gap-2">
+              <span className={`text-2xl font-black uppercase tracking-tight transition-colors ${isLcuAvailable ? "text-white group-hover:text-[var(--brand-primary)]" : "text-[var(--text-muted)]"}`}>
                 Client Draft
               </span>
-              <span className={`text-[12px] font-black uppercase tracking-[0.4em] transition-colors ${isLcuAvailable ? "text-[var(--text-muted)] group-hover:text-white opacity-60" : "text-[var(--text-muted)] opacity-40"}`}>
+              <span className={`text-[11px] font-black uppercase tracking-[0.3em] transition-colors ${isLcuAvailable ? "text-[var(--text-muted)] group-hover:text-white opacity-60" : "text-[var(--text-muted)] opacity-40"}`}>
                 {isLcuAvailable === false ? "Client Required" : "LCU Integration"}
               </span>
             </div>
-            {isLcuAvailable && (
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] transition-transform" />
-            )}
           </button>
           
           {showLcuError && (
-            <div className="absolute -bottom-20 left-0 right-0 text-center animate-bounce">
-              <span className="text-[var(--accent-red)] text-[11px] font-black uppercase tracking-widest bg-[var(--surface-color)] px-4 py-2 border border-[var(--accent-red)]/30 rounded-full shadow-lg">
+            <div className="absolute -bottom-12 left-0 right-0 text-center animate-bounce">
+              <span className="text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest bg-[var(--surface-color)] px-4 py-2 border border-[var(--accent-red)]/30 rounded-full shadow-lg">
                 The League Client must be running
               </span>
             </div>
@@ -92,7 +88,7 @@ export function Home({ onSelectMode }: HomeProps) {
         </div>
       </div>
 
-      <div className="mt-24 flex gap-10 text-[var(--text-muted)] font-black uppercase tracking-[0.6em] text-[11px] opacity-30">
+      <div className="mt-12 flex gap-8 text-[var(--text-muted)] font-black uppercase tracking-[0.4em] text-[10px] opacity-30">
         <span>v0.1.0</span>
         <span>•</span>
         <span>Cloud9 x JetBrains</span>

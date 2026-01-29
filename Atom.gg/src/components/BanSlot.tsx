@@ -2,16 +2,27 @@ import { Champion } from "../types/draft";
 
 interface BanSlotProps {
   ban: Champion | null;
+  team: "blue" | "red";
   isActive?: boolean;
+  isLowTime?: boolean;
   animationDuration?: string;
 }
 
-export function BanSlot({ ban, isActive, animationDuration }: BanSlotProps) {
+export function BanSlot({ ban, team, isActive, isLowTime, animationDuration }: BanSlotProps) {
+  const isBlue = team === "blue";
+  const blinkClass = isLowTime 
+    ? (isBlue ? "animate-intense-pulse-blue" : "animate-intense-pulse-red")
+    : (isBlue ? "animate-blink-blue" : "animate-blink-red");
+  const teamColor = isBlue ? "var(--accent-blue)" : "var(--accent-red)";
+
   return (
-    <div className={`w-[45px] h-[45px] lg:w-[55px] lg:h-[55px] border-2 bg-[var(--surface-color)] transition-all duration-300 flex items-center justify-center overflow-hidden shadow-lg ${
-      isActive ? "animate-smooth-pulse z-20" : "border-[var(--border-color)] hover:border-[var(--text-muted)]"
+    <div className={`ban-slot w-[42px] h-[42px] lg:w-[48px] lg:h-[48px] border-2 bg-[var(--surface-color)] transition-all duration-300 flex items-center justify-center overflow-hidden ${
+      isActive ? `${blinkClass} z-20` : ban ? "" : "border-[var(--border-color)] hover:border-[var(--text-muted)]"
     }`}
-    style={isActive && animationDuration ? { animationDuration } : {}}
+    style={{
+      ...(isActive && animationDuration ? { animationDuration } : {}),
+      ...(ban && !isActive ? { borderColor: teamColor } : {})
+    }}
     >
       {ban && (
         <img

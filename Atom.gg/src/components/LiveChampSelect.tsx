@@ -21,6 +21,7 @@ interface CurrentAction {
   isMyTurn: boolean;
   timeLeft: number;
   phase: string;
+  team: "blue" | "red" | null;
 }
 
 export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
@@ -66,6 +67,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     [championById, championByName]
   );
 
+  const blinkDuration = useMemo(() => {
+    if (currentAction.timeLeft > 20) return "2.0s";
+    if (currentAction.timeLeft > 10) return "1.2s";
+    if (currentAction.timeLeft > 5) return "0.8s";
+    return "0.6s";
+  }, [currentAction.timeLeft]);
+
   const bansFromActions = useMemo(() => {
     if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
 
@@ -103,25 +111,32 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }, [session]);
 
   const currentAction = useMemo((): CurrentAction => {
-    if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING" };
+    if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING", team: null };
 
     const localCellId = session.localPlayerCellId;
     const actions = session.actions || [];
     const timer = session.timer || {};
+    const myTeam = session.myTeam || [];
+    const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
 
-    let myCurrentAction = null;
+    let activeAction = null;
+    let isMyTurn = false;
+
     for (const group of actions) {
       if (!Array.isArray(group)) continue;
       for (const action of group) {
-        if (action.actorCellId === localCellId && action.isInProgress && !action.completed) {
-          myCurrentAction = action;
+        if (action.isInProgress && !action.completed) {
+          activeAction = action;
+          if (action.actorCellId === localCellId) {
+            isMyTurn = true;
+          }
           break;
         }
       }
-      if (myCurrentAction) break;
+      if (activeAction) break;
     }
 
-    //time left - account for time elapsed since session was fetched
+    //time left
     let timeLeft = 0;
     if (timer.adjustedTimeLeftInPhase !== undefined && timer.internalNowInEpochMs !== undefined) {
       const elapsedSinceSnapshot = currentTime - timer.internalNowInEpochMs;
@@ -133,36 +148,22 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     const phase = timer.phase || "WAITING";
     const isPlanning = phase === "PLANNING" || phase === "FINALIZATION";
 
-    if (myCurrentAction) {
+    if (activeAction) {
       return {
-        type: myCurrentAction.type,
-        isMyTurn: true,
+        type: isPlanning ? null : activeAction.type,
+        isMyTurn,
         timeLeft,
-        phase
+        phase,
+        team: myTeamCellIds.has(activeAction.actorCellId) ? "blue" : "red"
       };
     }
 
-    //check if any action is in progress (not our turn)
-    let someoneElseTurn = false;
-    let actionType: "ban" | "pick" | null = null;
-
-    for (const group of actions) {
-      if (!Array.isArray(group)) continue;
-      for (const action of group) {
-        if (action.isInProgress && !action.completed) {
-          someoneElseTurn = true;
-          actionType = action.type;
-          break;
-        }
-      }
-      if (someoneElseTurn) break;
-    }
-
     return {
-      type: isPlanning ? null : actionType,
+      type: null,
       isMyTurn: false,
       timeLeft,
-      phase
+      phase,
+      team: null
     };
   }, [session, currentTime]);
 
@@ -209,6 +210,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
     return names;
   }, [session, bansFromActions, championsMap]);
+
+  const teamHighlightColor = currentAction.team === "blue" ? "var(--accent-blue)" : currentAction.team === "red" ? "var(--accent-red)" : "var(--brand-primary)";
+  const teamHighlightShadow = currentAction.team === "blue" ? "rgba(0, 209, 255, 0.25)" : currentAction.team === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
 
   const filteredChampions = useMemo(() => {
     const filtered = [...champions]
@@ -412,6 +416,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return null;
   }, [currentAction.type, mlBanSuggest, mlMyPickSuggest]);
 
+  const [selectedRec, setSelectedRec] = useState<{ rec: MlRecommendation; champ: Champion | undefined } | null>(null);
+
   const visibleRecommendations = useMemo(() => {
     if (!activeMlSuggest) return [];
     const recommendationsMap = (activeMlSuggest.recommendations ?? {}) as Record<string, MlRecommendation[]>;
@@ -431,7 +437,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       recs = recommendationsMap[selectedRole] ?? [];
     }
 
-    return recs
+    const filtered = recs
       .map((rec) => ({ rec, champ: resolveChampion(rec.champion) }))
       .filter(({ champ }) => {
         if (!champ) return true;
@@ -439,7 +445,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         if (lockedChampionNames.has(champ.name)) return false;
         return !unavailableChampionIds.has(champ.numeric_id);
       });
-  }, [activeMlSuggest, lockedChampionNames, resolveChampion, selectedRole, unavailableChampionIds]);
+
+    return filtered;
+  }, [activeMlSuggest, lockedChampionNames, resolveChampion, selectedRole, unavailableChampionIds, selectedRec]);
+
+  const isLowTime = currentAction.timeLeft <= 10;
 
   const handleSelectChampion = async (champion: Champion) => {
     if (champion.name !== "none" && unavailableChampionIds.has(champion.numeric_id)) {
@@ -505,15 +515,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   };
 
   const getConfirmButtonColor = () => {
-    //if no champion or "none" is selected
-    if (!stagedChampion || stagedChampion.name === "none") {
-      return "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
-    }
-
-    if (currentAction.type === "ban") {
-      return "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]";
-    }
-    return "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]";
+    return "text-[var(--bg-color)] brightness-110";
   };
 
   // Keep these returns AFTER all hooks to preserve hook order.
@@ -521,8 +523,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)]">
         <div className="flex flex-col items-center gap-6">
-          <div className="w-16 h-16 border-4 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(0,209,255,0.2)]" />
-          <p className="text-2xl font-black uppercase tracking-[0.2em] text-[var(--accent-blue)] animate-pulse">Syncing with LCU...</p>
+          <div className="w-16 h-16 border-4 border-[var(--brand-primary)] border-t-transparent rounded-full animate-spin" />
+          <p className="text-2xl font-black uppercase tracking-[0.2em] text-[var(--brand-primary)] animate-pulse">Syncing with LCU...</p>
         </div>
       </div>
     );
@@ -533,27 +535,50 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }
 
   return (
-      <div className="flex flex-col h-full w-full p-6 bg-[var(--bg-color)] text-[var(--text-primary)] font-sans box-border relative overflow-hidden">
-        <div className="flex justify-between items-start mb-10">
-          <div className="flex flex-col gap-3">
-            <div className="text-xl font-black uppercase tracking-tighter text-[var(--accent-blue)]">
+      <div 
+        className="flex flex-col h-full w-full p-4 bg-[var(--bg-color)] text-[var(--text-primary)] font-sans box-border relative overflow-hidden"
+        style={{
+          '--team-accent': teamHighlightColor,
+          '--team-accent-shadow': teamHighlightShadow
+        } as React.CSSProperties}
+      >
+        <div className="flex justify-between items-start mb-4">
+          <div className="flex flex-col gap-2">
+            <div className="text-base font-black uppercase tracking-tighter text-[var(--accent-blue)]">
               Blue Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
-                  <BanSlot key={i} ban={getChamp(id)} />
+                  <BanSlot
+                    key={i}
+                    ban={getChamp(id)}
+                    team="blue"
+                    isActive={currentAction.type === "ban" && currentAction.team === "blue" && i === bansFromActions.myTeamBans.length}
+                    isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "blue"}
+                    animationDuration={blinkDuration}
+                  />
               ))}
-              {Array.from({ length: 5 - bansFromActions.myTeamBans.length }).map((_, i) => (
-                  <BanSlot key={`empty-my-${i}`} ban={null} />
-              ))}
+              {Array.from({ length: 5 - bansFromActions.myTeamBans.length }).map((_, i) => {
+                  const absoluteIndex = bansFromActions.myTeamBans.length + i;
+                  return (
+                    <BanSlot
+                      key={`empty-my-${i}`}
+                      ban={null}
+                      team="blue"
+                      isActive={currentAction.type === "ban" && currentAction.team === "blue" && absoluteIndex === bansFromActions.myTeamBans.length}
+                      isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "blue"}
+                      animationDuration={blinkDuration}
+                    />
+                  );
+              })}
             </div>
             <button
                 onClick={onBack}
-                className="mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl text-[11px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all group w-fit shadow-md"
+                className="mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all group w-fit"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 transform group-hover:-translate-x-1 transition-transform"
+                className="h-3 w-3 transform group-hover:-translate-x-1 transition-transform"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -565,37 +590,36 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                   d="M15 19l-7-7 7-7"
                 />
               </svg>
-              Exit Live Draft
+              Exit
             </button>
           </div>
 
-          <div className="flex flex-col items-center gap-4">
-            <div className="text-4xl font-black text-white tracking-tighter drop-shadow-[0_0_20px_rgba(0,209,255,0.2)]">LIVE <span className="text-[var(--accent-blue)]">INTEGRATION</span></div>
-            <div className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.4em] font-black bg-[var(--surface-color)] px-4 py-1 rounded-full border border-[var(--border-color)]">
-              {session.isCustomGame ? "Tournament / Custom" : "Matchmade Session"}
+          <div className="flex flex-col items-center gap-2">
+            <div className="text-2xl font-black text-white tracking-tighter uppercase">Live <span className="text-[var(--brand-primary)]">Integration</span></div>
+            <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.3em] font-black bg-[var(--surface-color)] px-3 py-0.5 rounded-full border border-[var(--border-color)]">
+              {session.isCustomGame ? "Tournament" : "Matchmaking"}
             </div>
 
             {/* Timer and Phase Display */}
-            <div className="flex flex-col items-center gap-2 bg-[var(--surface-color)] border-2 border-[var(--border-color)] rounded-2xl px-12 py-5 min-w-[320px] shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--accent-blue)] to-transparent opacity-30" />
-              <div className={`text-[13px] font-black uppercase tracking-[0.2em] ${
-                  currentAction.isMyTurn ? "text-[var(--accent-blue)]" : "text-[var(--text-muted)]"
+            <div className="flex flex-col items-center gap-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl px-8 py-3 min-w-[240px] relative overflow-hidden">
+              <div className={`text-[11px] font-black uppercase tracking-[0.15em] ${
+                  currentAction.isMyTurn ? "text-[var(--brand-primary)]" : "text-[var(--text-muted)]"
               }`}>
                 {getPhaseText()}
               </div>
-              <div className={`text-6xl font-black tabular-nums tracking-tighter transition-all duration-300 ${
+              <div className={`text-5xl font-black tabular-nums tracking-tighter transition-all duration-300 ${
                   currentAction.timeLeft <= 10
-                      ? "text-[var(--accent-red)] drop-shadow-[0_0_15px_rgba(255,75,80,0.4)] animate-pulse"
+                      ? "text-[var(--brand-primary)] animate-pulse"
                       : currentAction.isMyTurn
-                          ? "text-white drop-shadow-[0_0_15px_rgba(0,209,255,0.3)]"
+                          ? "text-white"
                           : "text-[var(--text-muted)] opacity-30"
               }`}>
                 {currentAction.timeLeft}
               </div>
               {currentAction.isMyTurn && (
-                  <div className="h-1.5 w-full bg-[var(--bg-color)] rounded-full overflow-hidden mt-3 border border-[var(--border-color)]">
+                  <div className="h-1 w-full bg-[var(--bg-color)] rounded-full overflow-hidden mt-2 border border-[var(--border-color)]">
                     <div
-                        className="h-full bg-[var(--accent-blue)] rounded-full transition-all duration-1000 ease-linear shadow-[0_0_10px_rgba(0,209,255,0.5)]"
+                        className="h-full bg-[var(--brand-primary)] rounded-full transition-all duration-1000 ease-linear"
                         style={{ width: `${(currentAction.timeLeft / 30) * 100}%` }}
                     />
                   </div>
@@ -603,23 +627,40 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 items-end">
-            <div className="text-xl font-black uppercase tracking-tighter text-[var(--accent-red)]">
+          <div className="flex flex-col gap-2 items-end">
+            <div className="text-base font-black uppercase tracking-tighter text-[var(--accent-red)]">
               Red Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1.5">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
-                  <BanSlot key={i} ban={getChamp(id)} />
+                  <BanSlot
+                    key={i}
+                    ban={getChamp(id)}
+                    team="red"
+                    isActive={currentAction.type === "ban" && currentAction.team === "red" && i === bansFromActions.theirTeamBans.length}
+                    isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "red"}
+                    animationDuration={blinkDuration}
+                  />
               ))}
-              {Array.from({ length: 5 - bansFromActions.theirTeamBans.length }).map((_, i) => (
-                  <BanSlot key={`empty-their-${i}`} ban={null} />
-              ))}
+              {Array.from({ length: 5 - bansFromActions.theirTeamBans.length }).map((_, i) => {
+                  const absoluteIndex = bansFromActions.theirTeamBans.length + i;
+                  return (
+                    <BanSlot
+                      key={`empty-their-${i}`}
+                      ban={null}
+                      team="red"
+                      isActive={currentAction.type === "ban" && currentAction.team === "red" && absoluteIndex === bansFromActions.theirTeamBans.length}
+                      isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "red"}
+                      animationDuration={blinkDuration}
+                    />
+                  );
+              })}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-1 justify-between gap-10 min-h-0">
-          <div className="flex flex-col gap-4 w-[220px] lg:w-[260px]">
+        <div className="flex flex-1 justify-between gap-6 min-h-0 w-full">
+          <div className="flex-1 flex flex-col gap-2 min-w-[180px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
@@ -631,28 +672,28 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                       index={i}
                       team="blue"
                       playerName={isCurrentPlayer ? "YOU" : (player.gameName || `Player ${i + 1}`)}
+                      isActive={currentAction.type === "pick" && currentAction.team === "blue" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      isLowTime={isLowTime && currentAction.type === "pick" && currentAction.team === "blue" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      animationDuration={blinkDuration}
                   />
               );
             })}
           </div>
 
-          <div className="flex-1 flex flex-col gap-4 min-w-0">
-            <div className="flex flex-col items-end gap-3">
+          <div className="flex-none flex flex-col gap-2 w-[800px] mx-auto">
+            <div className="flex flex-col items-end gap-2">
               <div className="relative">
                 <input
                     type="text"
-                    placeholder="Search champions..."
+                    placeholder="Search..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-[220px] h-[36px] border-2 border-[var(--border-color)] bg-[var(--surface-color)] px-5 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-all rounded-xl uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
+                    className="w-[180px] h-[28px] border border-[var(--border-color)] bg-[var(--surface-color)] px-4 text-[11px] focus:outline-none focus:border-[var(--brand-primary)] transition-all rounded-lg uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
                 />
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
               </div>
             </div>
-            <div className="flex-[3] border-2 border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-5 relative no-scrollbar rounded-2xl shadow-[inset_0_4px_12px_rgba(0,0,0,0.3)]">
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(65px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(75px,1fr))] gap-6">
+            <div className="flex-[3] border border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-3 relative no-scrollbar rounded-xl shadow-inner">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(55px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
                 {filteredChampions.map((champ) => (
                     <ChampionCard
                         key={champ.id}
@@ -660,6 +701,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                         isSelected={champ.name !== "none" && unavailableChampionIds.has(champ.numeric_id)}
                         isStaged={stagedChampion?.id === champ.id}
                         onSelect={(c) => handleSelectChampion(c)}
+                        highlightColor={teamHighlightColor}
                     />
                 ))}
               </div>
@@ -667,127 +709,171 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             <button
                 onClick={handleConfirm}
                 disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
-                className={`w-full py-2.5 rounded-xl font-black uppercase tracking-[0.25em] transition-all transform active:scale-[0.98] text-base border-2 shadow-xl ${
+                className={`w-full py-2 rounded-xl font-black uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] text-sm border-2 ${
                     stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
                         : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-40"
                 }`}
+                style={stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn ? {
+                  backgroundColor: teamHighlightColor,
+                  borderColor: teamHighlightColor
+                } : {}}
             >
               {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Game" : getConfirmButtonText()}
             </button>
 
             {canShowRecommendations && (
-              <div className="mt-6 border-2 border-[var(--border-color)] bg-[var(--surface-color)] rounded-2xl p-6 shadow-2xl relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--accent-blue)] to-transparent opacity-20" />
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-[var(--accent-blue)] font-black uppercase tracking-[0.2em] text-[11px] flex items-center gap-2">
-                    <span className="w-2 h-2 bg-[var(--accent-blue)] rounded-full animate-pulse" />
-                    ML PREDICTIONS ({suggestContext.label})
-                  </div>
-                  <button
-                    onClick={() => refreshRecommendations()}
-                    className="px-4 py-1.5 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all shadow-md"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                {activeMlSuggest && typeof activeMlSuggest.blue_winrate === "number" && typeof activeMlSuggest.red_winrate === "number" && (
-                  <div className="mb-4 flex items-center gap-6 text-[11px] font-black uppercase tracking-[0.1em] bg-[var(--bg-color)] p-3 rounded-xl border border-[var(--border-color)] w-fit">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--text-muted)] opacity-50">BLUE PROB:</span>
-                      <span className="text-[var(--accent-blue)] text-base">{(activeMlSuggest.blue_winrate * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="w-px h-4 bg-[var(--border-color)]" />
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--text-muted)] opacity-50">RED PROB:</span>
-                      <span className="text-[var(--accent-red)] text-base">{(activeMlSuggest.red_winrate * 100).toFixed(1)}%</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-2 flex-wrap mb-4">
-                  {UI_ROLES.map((role) => (
-                    <button
-                      key={role}
-                      onClick={() => setSelectedRole(role)}
-                      className={`px-4 py-2 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                        selectedRole === role
-                          ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-[var(--bg-color)] shadow-lg"
-                          : "bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)]"
-                      }`}
-                      title={role}
-                      type="button"
-                    >
-                      {role === "MIDDLE"
-                        ? "MID"
-                        : role === "BOTTOM"
-                        ? "ADC"
-                        : role === "UTILITY"
-                        ? "SUPPORT"
-                        : role === "ALL"
-                        ? "ALL ROLES"
-                        : role}
-                    </button>
-                  ))}
-                </div>
-
-                {mlError && (
-                  <div className="mb-4 text-[var(--accent-red)] text-[11px] font-black uppercase tracking-widest animate-pulse">
-                    ⚠️ {mlError}
-                  </div>
-                )}
-
-                <div className="max-h-[350px] overflow-y-auto no-scrollbar pr-1">
-                  {activeMlSuggest ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {visibleRecommendations.map(({ rec, champ }) => (
-                        <div
-                          key={`${selectedRole}-${rec.champion}`}
-                          className="flex items-center gap-4 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-xl p-3.5 hover:border-[var(--accent-blue)] transition-all cursor-pointer hover:bg-[var(--surface-color-hover)] shadow-md group"
-                          onClick={() => {
-                            if (!champ) return;
-                            setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
-                            if (stagedChampion?.name !== champ.name) {
-                              handleSelectChampion(champ);
-                            }
-                          }}
+              <div className="mt-4 border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl p-4 relative overflow-hidden flex-1 flex flex-col min-h-0">
+                {selectedRec ? (
+                  <div className="absolute inset-0 bg-[var(--bg-color)]/95 p-2 flex animate-in fade-in duration-300 z-20">
+                    <div className="w-[110px] flex flex-col items-center gap-3 shrink-0 mt-3">
+                      {selectedRec.champ ? (
+                        <img
+                          src={selectedRec.champ.icon}
+                          alt={selectedRec.champ.name}
+                          className="w-16 h-16 border-2 rounded-xl"
+                          style={{ borderColor: teamHighlightColor }}
+                        />
+                      ) : (
+                        <div 
+                          className="w-16 h-16 border-2 bg-[var(--surface-color)] rounded-xl"
+                          style={{ borderColor: teamHighlightColor }}
+                        />
+                      )}
+                      <div className="flex flex-col gap-1 items-center text-center w-full">
+                        <div className="text-sm font-black uppercase tracking-tight text-white truncate w-full">
+                          {selectedRec.champ ? selectedRec.champ.name : selectedRec.rec.champion}
+                        </div>
+                        <div 
+                          className="text-xs font-black uppercase tracking-wider"
+                          style={{ color: teamHighlightColor }}
                         >
-                          {champ ? (
-                            <div className="relative">
-                              <img src={champ.icon} alt={champ.name} className="w-12 h-12 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--accent-blue)] transition-colors" />
-                              <div className="absolute -top-1.5 -right-1.5 bg-[var(--accent-blue)] text-[var(--bg-color)] text-[9px] font-black px-1.5 rounded border border-[var(--bg-color)] shadow-sm">
-                                {(rec.score * 100).toFixed(0)}%
+                          {(selectedRec.rec.score * 100).toFixed(0)}%
+                        </div>
+                        <button 
+                          onClick={() => setSelectedRec(null)}
+                          className="mt-2 px-4 py-1 bg-[var(--surface-color)] border-2 border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-white hover:bg-[var(--surface-color-hover)] hover:border-[var(--team-accent)] transition-all"
+                        >
+                          Back
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl p-3 text-[13px] leading-relaxed text-[var(--text-secondary)] italic overflow-y-auto no-scrollbar whitespace-pre-line shadow-inner">
+                      {selectedRec.rec.tactical || "No detailed analysis available."}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-black uppercase tracking-[0.15em] text-[10px] flex items-center gap-1.5" style={{ color: 'var(--team-accent)' }}>
+                        <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--team-accent)' }} />
+                        Strategy Recommendations
+                      </div>
+                      <button
+                        onClick={() => refreshRecommendations()}
+                        className="px-3 py-1 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-md text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)] transition-all"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    {activeMlSuggest && typeof activeMlSuggest.blue_winrate === "number" && typeof activeMlSuggest.red_winrate === "number" && (
+                      <div className="mb-3 flex items-center gap-4 text-[10px] font-black uppercase tracking-[0.05em] bg-[var(--bg-color)] p-2 rounded-lg border border-[var(--border-color)] w-fit">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[var(--text-muted)] opacity-50">BLUE:</span>
+                          <span className="text-[var(--accent-blue)] text-sm">{(activeMlSuggest.blue_winrate * 100).toFixed(1)}%</span>
+                        </div>
+                        <div className="w-px h-3 bg-[var(--border-color)]" />
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[var(--text-muted)] opacity-50">RED:</span>
+                          <span className="text-[var(--accent-red)] text-sm">{(activeMlSuggest.red_winrate * 100).toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-1.5 flex-wrap mb-3">
+                      {UI_ROLES.map((role) => (
+                        <button
+                          key={role}
+                          onClick={() => setSelectedRole(role)}
+                          className={`px-3 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${
+                            selectedRole === role
+                              ? "bg-[var(--team-accent)] border-[var(--team-accent)] text-[var(--bg-color)]"
+                              : "bg-[var(--bg-color)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)]"
+                          }`}
+                          title={role}
+                          type="button"
+                        >
+                          {role === "MIDDLE"
+                            ? "MID"
+                            : role === "BOTTOM"
+                            ? "ADC"
+                            : role === "UTILITY"
+                            ? "SUPP"
+                            : role === "ALL"
+                            ? "ALL"
+                            : role}
+                        </button>
+                      ))}
+                    </div>
+
+                    {mlError && (
+                      <div className="mb-2 text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest animate-pulse">
+                        ⚠️ {mlError}
+                      </div>
+                    )}
+
+                    <div className="max-h-[300px] overflow-y-auto no-scrollbar pr-1">
+                      {activeMlSuggest ? (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+                          {visibleRecommendations.map(({ rec, champ }) => (
+                            <div
+                              key={`${selectedRole}-${rec.champion}`}
+                              className="flex flex-col items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2 hover:border-[var(--team-accent)] transition-all cursor-pointer hover:bg-[var(--surface-color-hover)] group"
+                              onClick={() => {
+                                if (!champ) return;
+                                setSelectedRec({ rec, champ });
+                                setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
+                                if (stagedChampion?.name !== champ.name) {
+                                  handleSelectChampion(champ);
+                                }
+                              }}
+                            >
+                              {champ ? (
+                                <div className="relative">
+                                  <img src={champ.icon} alt={champ.name} className="w-14 h-14 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--team-accent)] transition-all" />
+                                  <div className="absolute -top-1 -right-1 bg-[var(--team-accent)] text-[var(--bg-color)] text-[8px] font-black px-1 rounded border border-[var(--bg-color)]">
+                                    {(rec.score * 100).toFixed(0)}%
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-14 h-14 border-2 border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg" />
+                              )}
+
+                              <div className="w-full text-center">
+                                <div className="truncate font-black uppercase tracking-tight text-[10px] text-white">
+                                  {champ ? champ.name : rec.champion}
+                                </div>
                               </div>
                             </div>
-                          ) : (
-                            <div className="w-12 h-12 border-2 border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg" />
+                          ))}
+
+                          {visibleRecommendations.length === 0 && (
+                            <div className="col-span-full text-[var(--text-muted)] text-[10px] font-black uppercase tracking-widest text-center py-6 opacity-30">No predictions</div>
                           )}
-
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate font-black uppercase tracking-tight text-[13px] text-white">
-                              {champ ? champ.name : rec.champion}
-                            </div>
-                            {rec.tactical && <div className="text-[10px] text-[var(--text-secondary)] mt-1 leading-snug italic opacity-80 group-hover:opacity-100 transition-opacity">
-                              {rec.tactical.split('\n')[0]}
-                            </div>}
-                          </div>
                         </div>
-                      ))}
-
-                      {visibleRecommendations.length === 0 && (
-                        <div className="col-span-full text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest text-center py-10 opacity-30">No predictions matching criteria</div>
+                      ) : (
+                        <div className="text-[var(--text-muted)] text-[10px] font-black uppercase tracking-widest text-center py-6 animate-pulse">Analyzing...</div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest text-center py-10 animate-pulse">Running Neural Inference...</div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
             )}
           </div>
 
-          <div className="flex flex-col gap-4 w-[220px] lg:w-[260px]">
+          <div className="flex-1 flex flex-col gap-2 min-w-[180px]">
             {theirTeam.map((player: any, i: number) => {
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
@@ -798,6 +884,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                       index={i}
                       team="red"
                       playerName={`Enemy ${i + 1}`}
+                      isActive={currentAction.type === "pick" && currentAction.team === "red" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      isLowTime={isLowTime && currentAction.type === "pick" && currentAction.team === "red" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      animationDuration={blinkDuration}
                   />
               );
             })}
