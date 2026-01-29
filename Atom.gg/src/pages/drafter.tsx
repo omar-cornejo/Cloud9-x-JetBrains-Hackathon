@@ -628,7 +628,7 @@ function Drafter({ config, onBack }: DrafterProps) {
           >
             Confirm
           </button>
-          <div className="flex-[1.4] border-2 border-[#333] bg-[#1a1a1a] rounded overflow-hidden relative">
+          <div className="flex-[1.8] border-2 border-[#333] bg-[#1a1a1a] rounded overflow-hidden relative">
             {selectedRec ? (
               <div className="absolute inset-0 bg-black/90 p-4 flex flex-col gap-4 animate-in fade-in duration-300 z-20">
                 <button 
@@ -638,7 +638,7 @@ function Drafter({ config, onBack }: DrafterProps) {
                   Back
                 </button>
                 
-                <div className="flex items-center gap-4 mt-2">
+                <div className="flex items-center gap-4 mt-1">
                   {selectedRec.champ ? (
                     <img
                       src={selectedRec.champ.icon}
@@ -658,7 +658,7 @@ function Drafter({ config, onBack }: DrafterProps) {
                   </div>
                 </div>
 
-                <div className="flex-1 bg-[#1a1a1a]/80 border border-[#333] rounded-lg p-4 text-sm leading-relaxed text-gray-300 italic overflow-y-auto no-scrollbar">
+                <div className="flex-1 bg-[#1a1a1a]/80 border border-[#333] rounded-lg p-3 text-base leading-relaxed text-gray-300 italic overflow-y-auto no-scrollbar whitespace-pre-line">
                   {selectedRec.rec.tactical || "No detailed analysis available for this champion."}
                 </div>
               </div>
@@ -727,13 +727,13 @@ function Drafter({ config, onBack }: DrafterProps) {
                             ) : (
                               <div className="w-10 h-10 border border-[#222] bg-[#222] rounded" />
                             )}
-                            <div className="absolute -top-1 -right-1 bg-[#3498db] text-white text-[7px] font-black px-1 rounded border border-[#141414] shadow-sm">
+                            <div className="absolute -top-1 -right-1 bg-[#3498db] text-white text-[10px] font-black px-1 rounded border border-[#141414] shadow-sm">
                               {(rec.score * 100).toFixed(0)}%
                             </div>
                           </div>
 
                           <div className="w-full text-center">
-                            <div className="truncate font-black uppercase tracking-tighter text-[9px] text-gray-300">
+                            <div className="truncate font-black uppercase tracking-tighter text-[12px] text-gray-300">
                               {champ ? champ.name : rec.champion}
                             </div>
                           </div>

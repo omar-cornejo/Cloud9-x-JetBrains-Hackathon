@@ -57,17 +57,17 @@ class TournamentDraft:
         self.DB_FILE = abs_path(db_file)
 
         if not self.quiet:
-            print("⚙️  Cargando Tournament Suite V9.5 (SQL Preserved + Meta)...")
+            print("Loading Tournament Suite V9.5 (SQL Preserved + Meta)...")
 
         # 1. MODEL
         self.model = xgb.Booster()
         try:
             self.model.load_model(self.MODEL_FILE)
             if not self.quiet:
-                print(f"   🧠 Cerebro cargado: {self.MODEL_FILE}")
+                print(f"   Brain loaded: {self.MODEL_FILE}")
         except Exception:
             if not self.quiet:
-                print(f"   ❌ Error cargando {self.MODEL_FILE}. Verifica la ruta.")
+                print(f"   Error loading {self.MODEL_FILE}. Check path.")
 
         # 2. FEATURES
         self.df = pl.read_parquet(self.FEATURE_FILE)
@@ -75,27 +75,27 @@ class TournamentDraft:
         # 3. PROS
         if os.path.exists(self.PRO_SIG_FILE):
             if not self.quiet:
-                print(f"   🏆 Base de Datos de Pros cargada: {self.PRO_SIG_FILE}")
+                print(f"   Pro Database loaded: {self.PRO_SIG_FILE}")
             self.pro_stats = pl.read_parquet(self.PRO_SIG_FILE)
         else:
             if not self.quiet:
-                print("   ⚠️ No se encontró 'draft_oracle_pro_signatures.parquet'. Modo SoloQ.")
+                print("   Pro signatures not found. SoloQ mode.")
             self.pro_stats = None
 
         # 4. TOURNAMENT META
         if os.path.exists(self.TOURNAMENT_META_FILE):
             if not self.quiet:
-                print(f"   🔥 Meta de Torneos cargado: {self.TOURNAMENT_META_FILE}")
+                print(f"   Tournament Meta loaded: {self.TOURNAMENT_META_FILE}")
             self.meta_stats = pl.read_parquet(self.TOURNAMENT_META_FILE)
         else:
             if not self.quiet:
-                print("   ⚠️ No se encontró Meta de Torneos. Se ignorará este factor.")
+                print("   Tournament Meta not found. Ignoring factor.")
             self.meta_stats = None
 
         # 5. SYNERGY
         if os.path.exists(self.SYNERGY_FILE):
             if not self.quiet:
-                print("   ❤️  Matriz de Sinergias: Cargada")
+                print("   Synergy Matrix: Loaded")
             self.synergy_raw = pl.read_parquet(self.SYNERGY_FILE)
             self.synergy_map: Dict[Tuple[int, int], float] = {}
             rows = self.synergy_raw.select(["champ_id", "champ_id_right", "syn_winrate"]).to_numpy()
@@ -351,7 +351,7 @@ class TournamentDraft:
     # --- SUPPORT ---
     def _load_api(self):
         if not self.quiet:
-            print("🌍 Conectando a Riot API...")
+            print("Connecting to Riot API...")
         try:
             v = requests.get("https://ddragon.leagueoflegends.com/api/versions.json", timeout=10).json()[0]
             r = requests.get(
@@ -360,13 +360,15 @@ class TournamentDraft:
             ).json()
             self.name_to_id = {k.lower(): int(vv["key"]) for k, vv in r["data"].items()}
             self.id_to_name = {int(vv["key"]): vv["id"] for k, vv in r["data"].items()}
+            self.id_to_display_name = {int(vv["key"]): vv["name"] for k, vv in r["data"].items()}
             if not self.quiet:
-                print(f"✨ API Actualizada a v{v}")
+                print(f"API Updated to v{v}")
         except Exception:
             if not self.quiet:
-                print("⚠️ Error API. Usando diccionario local.")
+                print("API Error. Using local dictionary.")
             self.name_to_id = {}
             self.id_to_name = {}
+            self.id_to_display_name = {}
 
     def _prepare_role_solver(self):
         rs = self.df.group_by(["champ_id", "position"]).agg(pl.col("games_played").sum())
@@ -389,11 +391,11 @@ class TournamentDraft:
     # --- DATA / ROSTERS (SQL) ---
     def set_roster_auto(self, side: str, team_name: str):
         if not self.quiet:
-            print(f"🔎 Buscando alineación para '{team_name}' en la base de datos...")
+            print(f"Searching for roster for '{team_name}' in database...")
 
         if not os.path.exists(self.DB_FILE):
             if not self.quiet:
-                print(f"❌ No se encontró '{self.DB_FILE}'.")
+                print(f"Could not find '{self.DB_FILE}'.")
             return
 
         try:
@@ -443,7 +445,7 @@ class TournamentDraft:
                             players_found += 1
 
                     if not self.quiet:
-                        print(f"✅ Alineación de {team_name} cargada ({players_found} titulares encontrados).")
+                        print(f"Roster for {team_name} loaded ({players_found} starters found).")
                         for r in ["top", "jungle", "middle", "bottom", "utility"]:
                             p = self.teams[side]["players"].get(r, "---")
                             print(f"   - {r.upper()}: {p}")
@@ -470,23 +472,27 @@ class TournamentDraft:
                         }
 
                         if not self.quiet:
-                            print("✅ Alineación cargada desde vistas de liga.")
+                            print("Roster loaded from league views.")
                             for r in ["top", "jungle", "middle", "bottom", "utility"]:
                                 p = self.teams[side]["players"].get(r, "---")
                                 print(f"   - {r.upper()}: {p}")
                         return
 
             if not self.quiet:
-                print(f"⚠️ No se encontró el equipo '{team_name}' en la DB. Intenta con el nombre exacto.")
+                print(f"Team '{team_name}' not found in DB. Try exact name.")
 
         except Exception as e:
             if not self.quiet:
-                print(f"❌ Error leyendo DB: {e}")
+                print(f"Error reading DB: {e}")
 
     # --- BIAS ---
-    def get_pro_bias(self, player_name: Optional[str], champ_name: str) -> Tuple[float, str]:
+    def is_pro_match(self) -> bool:
+        """Determines if the current match is professional by checking if both teams have players loaded."""
+        return bool(self.teams["BLUE"]["players"]) and bool(self.teams["RED"]["players"])
+
+    def get_pro_bias(self, player_name: Optional[str], champ_name: str) -> Tuple[float, str, int]:
         if self.pro_stats is None or not player_name or player_name.lower() in ["none", ""]:
-            return 0.0, ""
+            return 0.0, "", 0
 
         stats = self.pro_stats.filter(
             (pl.col("player_name").str.to_lowercase() == player_name.lower())
@@ -494,22 +500,40 @@ class TournamentDraft:
         )
 
         if stats.height == 0:
-            return -0.02, "❓New"
+            return 0.0, "", 0
 
         try:
-            games = stats["games_played"][0]
+            games = int(stats["games_played"][0])
             wr = stats["pro_winrate"][0] * 100
             score = stats["proficiency_score"][0]
 
-            if score > 0.15:
-                return 0.10, f"🌟GOD ({games}g {wr:.0f}%)"
-            if games > 10:
-                return 0.05, f"✅Main ({games}g)"
-            if wr < 40 and games > 5:
-                return -0.05, f"❌Bad ({wr:.0f}%)"
-            return 0.01, f"ℹ️Ok ({games}g)"
+            # In professional matches, we want these picks to jump to the top.
+            # Normalizing everything relative to 0.5 winrate.
+            is_pro = self.is_pro_match()
+            
+            # Base values (SoloQ/Normal context)
+            if score > 0.3:
+                bonus = 0.4
+                note = f"Pro GOD ({games}g {wr:.0f}%)"
+            elif games > 25:
+                bonus = 0.6
+                note = f"Pro Main ({games}g)"
+            elif wr < 40 and games > 5:
+                bonus = -0.10
+                note = f"Pro Poor ({wr:.0f}%)"
+            else:
+                bonus = 0.05
+                note = f"Pro Experience ({games}g)"
+
+            # If it's a professional match, amplify the signature pick bonuses significantly.
+            if is_pro and bonus > 0:
+                # Up to 1.5x bonus for pro matches to ensure signature picks dominate recommendations.
+                bonus *= 1.5
+
+
+            return bonus, note, games
         except Exception:
-            return 0.0, "⚠️Err"
+            return 0.0, "Err", 0
 
     def get_tournament_bias(self, champ_name: str) -> Tuple[float, str]:
         if self.meta_stats is None:
@@ -523,11 +547,11 @@ class TournamentDraft:
         wr = row["tourney_winrate"][0] * 100
 
         if presence > 40:
-            return 0.06, f"🔥Meta King ({presence} picks)"
+            return 0.06, f"Meta King ({presence} picks)"
         if presence > 15 and wr > 55:
-            return 0.04, f"📈Hidden OP ({wr:.0f}% WR)"
+            return 0.04, f"Hidden OP ({wr:.0f}% WR)"
         if presence > 10:
-            return 0.02, f"✅Meta ({presence} picks)"
+            return 0.02, f"Meta ({presence} picks)"
 
         return 0.0, ""
 
@@ -536,14 +560,14 @@ class TournamentDraft:
         wr = self.predict_live_winrate()
 
         if not self.quiet:
-            print("\n⚖️  CALCULANDO PREDICCIÓN FINAL DEL PARTIDO...")
-            print(f"📊 Probabilidad de Victoria BLUE: {wr['blue']:.1%}")
+            print("\n CALCULATING FINAL MATCH PREDICITION...")
+            print(f" BLUE Win Probability: {wr['blue']:.1%}")
             if wr["blue"] > 0.5:
-                print("🚀 PREDICCIÓN: GANA BLUE TEAM")
+                print("PREDICTION: BLUE TEAM WINS")
             else:
-                print("🚀 PREDICCIÓN: GANA RED TEAM")
+                print(" PREDICTION: RED TEAM WINS")
 
-    def get_tactical_analysis(self, champ_id: int, champ_stats: Any, my_role: str, target_side: str) -> str:
+    def get_tactical_analysis(self, champ_id: int, champ_stats: Any, my_role: str, target_side: str) -> List[str]:
         reasons: List[str] = []
 
         # A. SYNERGY (YOUR TEAM)
@@ -564,7 +588,7 @@ class TournamentDraft:
                     best_syn_partner = ally_name
 
         if best_syn_partner:
-            reasons.append(f"🤝Combo con {best_syn_partner} ({(0.5 + best_syn_score):.0%} WR)")
+            reasons.append(f"Combo with {best_syn_partner} ({(0.5 + best_syn_score):.0%} WR)")
 
         # B. MATCHUP (VS ENEMY)
         enemies = self.red_picks if target_side == "BLUE" else self.blue_picks
@@ -584,16 +608,16 @@ class TournamentDraft:
                 en_scale = enemy_row["style_gold_hunger"][0] or 0
 
                 if my_prio > en_prio + 2:
-                    reasons.append(f"⚔️Gana línea a {enemy_laner} (Dominante)")
+                    reasons.append(f"Wins lane vs {enemy_laner} (Dominant)")
                 elif my_prio < en_prio - 2:
-                    reasons.append(f"🛡️Jugar seguro vs {enemy_laner} (Prio-)")
+                    reasons.append(f"Play safe vs {enemy_laner} (Low Prio)")
 
                 if my_scale > en_scale + 2:
-                    reasons.append(f"📈Outscalea a {enemy_laner} (Late)")
+                    reasons.append(f"Outscales {enemy_laner} (Late)")
                 elif my_prio > en_prio + 1 and my_scale < en_scale:
-                    reasons.append(f"⚡Debe stompear early a {enemy_laner}")
+                    reasons.append(f"Must stomp early vs {enemy_laner}")
 
-        return " | ".join(reasons)
+        return reasons
 
     # --- GAME STATE ---
     def configure_series(self, mode: str, total_games: int):
@@ -611,7 +635,7 @@ class TournamentDraft:
         self.blue_roles: Dict[str, str] = {}
         self.red_roles: Dict[str, str] = {}
         if not self.quiet:
-            self.print_dashboard(last_action="Partida Iniciada")
+            self.print_dashboard(last_action="Game Started")
 
     def get_forbidden_champs(self, my_side: str):
         forbidden = set(self.blue_picks + self.red_picks + self.bans)
@@ -644,7 +668,7 @@ class TournamentDraft:
             return
         self.bans.append(c)
         if not self.quiet:
-            self.print_dashboard(last_action=f"🚫 BAN: {c}")
+            self.print_dashboard(last_action=f"BAN: {c}")
 
     def add_pick(self, side: str, champ_name: str):
         c = self._resolve_name(champ_name)
@@ -653,14 +677,14 @@ class TournamentDraft:
         forbidden = self.get_forbidden_champs(side)
         if c in forbidden:
             if not self.quiet:
-                print(f"🔒 BLOQUEADO ({self.series_config['mode']}): {c} no disponible.")
+                print(f"BLOCKED ({self.series_config['mode']}): {c} not available.")
             return
         if side == "BLUE":
             self.blue_picks.append(c)
         else:
             self.red_picks.append(c)
         if not self.quiet:
-            self.print_dashboard(last_action=f"✅ {side} PICK: {c}")
+            self.print_dashboard(last_action=f"{side} PICK: {c}")
 
     def end_game(self):
         self.history.append(
@@ -668,10 +692,10 @@ class TournamentDraft:
         )
         if self.series_config["current_game"] >= self.series_config["total_games"]:
             if not self.quiet:
-                print("\n🏆🏁 SERIE FINALIZADA.")
+                print("\nSERIES FINISHED.")
             return
         if not self.quiet:
-            print("\n🔄 CAMBIANDO DE LADO...")
+            print("\nCHANGING SIDES...")
         self.series_config["current_game"] += 1
         self.reset_game_board()
 
@@ -679,14 +703,14 @@ class TournamentDraft:
     def suggest_picks(self, side: str):
         team = self.teams[side]
         if not self.quiet:
-            print(f"🧠 Buscando los Mejores Picks para {team['name']}...")
+            print(f"Searching for best picks for {team['name']}...")
         self._analyze_and_print(side, is_ban_mode=False)
 
     def suggest_bans(self, my_side: str):
         enemy_side = "RED" if my_side == "BLUE" else "BLUE"
         enemy_team = self.teams[enemy_side]
         if not self.quiet:
-            print(f"🛡️ Analizando AMENAZAS de {enemy_team['name']} (Sugerencia de Ban)...")
+            print(f"Analyzing threats from {enemy_team['name']} (Ban recommendations)...")
         self._analyze_and_print(enemy_side, is_ban_mode=True)
 
     def get_suggestions(self, target_side: str, is_ban_mode: bool, roles: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -744,45 +768,51 @@ class TournamentDraft:
             total_games = cands["games_played"].sum()
             cands = cands.filter(pl.col("games_played") > 100)
             cands = cands.with_columns((pl.col("games_played") / total_games).alias("pr")).filter(pl.col("pr") > 0.005)
-            cand_pd = cands.sort("stat_winrate", descending=True).limit(40).to_pandas()
+            cand_pd = cands.sort("stat_winrate", descending=True).limit(150).to_pandas()
 
             for _, row in cand_pd.iterrows():
                 c_name = self.id_to_name.get(row["champ_id"])
                 if not c_name or c_name in forbidden:
                     continue
 
+                display_name = self.id_to_display_name.get(int(row["champ_id"]), c_name)
                 base_score = row["stat_winrate"]
-                pro_bonus, pro_note = self.get_pro_bias(p_name, c_name)
+                pro_bonus, pro_note, pro_games = self.get_pro_bias(p_name, display_name)
                 meta_bonus, meta_note = self.get_tournament_bias(c_name)
                 final_score = base_score + pro_bonus + meta_bonus
+                final_score = min(1.0, final_score)
 
                 tactical_note = self.get_tactical_analysis(int(row["champ_id"]), row, role, target_side)
 
                 parts: List[str] = []
                 if pro_note:
                     parts.append(pro_note)
+                if pro_bonus > 0 and p_name and pro_games >= 20:
+                    parts.append(f"{display_name} is best for {p_name}")
                 if meta_note:
                     parts.append(meta_note)
                 if tactical_note:
-                    parts.append(tactical_note)
+                    parts.extend(tactical_note)
                 elif row["stat_winrate"] > 0.52:
-                    parts.append("Stats Fuertes")
+                    parts.append("Strong Stats")
 
-                reason_text = " || ".join(parts)
+                reason_text = "\n- ".join(parts)
+                if reason_text:
+                    reason_text = "- " + reason_text
 
                 tags: List[str] = []
                 if pro_bonus > 0:
-                    tags.append("👤")
+                    tags.append("P")
                 if meta_bonus > 0:
-                    tags.append("🏆")
+                    tags.append("T")
 
                 threat = ""
                 if is_ban_mode:
                     threat = "Normal"
                     if final_score > 0.60:
-                        threat = "☠️LETHAL"
+                        threat = "LETHAL"
                     elif final_score > 0.55:
-                        threat = "⚠️HIGH"
+                        threat = "HIGH"
 
                 suggestions.append(
                     Suggestion(
@@ -837,7 +867,7 @@ class TournamentDraft:
         if not open_roles:
             return
 
-        t = "🚫 SUGERENCIA DE BANS" if is_ban_mode else "✅ SUGERENCIA DE PICKS"
+        t = "BAN RECOMMENDATIONS" if is_ban_mode else "PICK RECOMMENDATIONS"
         print(f"\n{t} ({target_side}):")
 
         df_res_rows: List[Dict[str, Any]] = []
@@ -845,12 +875,12 @@ class TournamentDraft:
             for rec in res["recommendations"].get(role, []):
                 df_res_rows.append(
                     {
-                        "Rol": role,
-                        "Campeón": rec["champion"],
+                        "Role": role,
+                        "Champion": rec["champion"],
                         "Score": rec["score"],
                         "Tags": rec.get("tags", ""),
                         "Threat": rec.get("threat", ""),
-                        "Análisis Táctico": rec.get("tactical", ""),
+                        "Tactical Analysis": rec.get("tactical", ""),
                     }
                 )
 
@@ -858,11 +888,11 @@ class TournamentDraft:
 
         for role in open_roles:
             p_name = self.teams[target_side]["players"].get(role.lower(), "Unknown")
-            print(f"\n📍 {role} ({p_name}):")
-            top_10 = df_res[df_res["Rol"] == role].head(10)
-            cols = ["Campeón", "Score", "Tags", "Análisis Táctico"]
+            print(f"\n{role} ({p_name}):")
+            top_10 = df_res[df_res["Role"] == role].head(10)
+            cols = ["Champion", "Score", "Tags", "Tactical Analysis"]
             if is_ban_mode:
-                cols = ["Campeón", "Score", "Threat", "Análisis Táctico"]
+                cols = ["Champion", "Score", "Threat", "Tactical Analysis"]
             if not top_10.empty:
                 print(top_10[cols].to_string(index=False, formatters={"Score": "{:.1%}".format}))
 
@@ -893,7 +923,7 @@ class TournamentDraft:
         return best_assign
 
     # --- DISPLAY (CLI) ---
-    def print_dashboard(self, last_action: str = "Esperando acción..."):
+    def print_dashboard(self, last_action: str = "Waiting for action..."):
         self.blue_roles = self._solve_roles(self.blue_picks)
         self.red_roles = self._solve_roles(self.red_picks)
         border = "═" * 86
@@ -901,17 +931,17 @@ class TournamentDraft:
         print(f"╔{border}╗")
         blocked = self.get_blocked_count()
         header = (
-            f" JUEGO {self.series_config['current_game']}/{self.series_config['total_games']} | "
-            f"MODO: {self.series_config['mode']} | BLOQUEADOS: {blocked}"
+            f" GAME {self.series_config['current_game']}/{self.series_config['total_games']} | "
+            f"MODE: {self.series_config['mode']} | BLOCKED: {blocked}"
         )
         print(f"║ {header:<84} ║")
         print(f"╠{border}╣")
 
         b_n, r_n = self.teams["BLUE"]["name"], self.teams["RED"]["name"]
-        print(f"║ 🔵 {b_n:<38}  VS  {r_n:>38} 🔴 ║")
+        print(f"║ BLUE {b_n:<38}  VS  {r_n:>38} RED ║")
 
-        bans_txt = ", ".join(self.bans) if self.bans else "Ninguno"
-        print(f"║ 🚫 BANS ACTIVOS: {bans_txt:<67} ║")
+        bans_txt = ", ".join(self.bans) if self.bans else "None"
+        print(f"║ ACTIVE BANS: {bans_txt:<67} ║")
         print(f"╠{border}╣")
 
         roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
@@ -930,21 +960,21 @@ class TournamentDraft:
             print(f"║ {str_b:<35} < {r:^8} > {str_r:>35} ║")
 
         print(f"╚{border}╝")
-        print(f"📢 ÚLTIMA ACCIÓN: {last_action}\n")
+        print(f" LAST ACTION: {last_action}\n")
 
 
 def run_interactive():
     app = TournamentDraft(quiet=False)
 
-    print("\n🕹️ COMANDOS DE TORNEO (AUTO-ROSTER):")
-    print("  setup             -> Configurar")
-    print("  roster [B/R] [Team] -> Ej: 'roster BLUE T1'")
+    print("\n TOURNAMENT COMMANDS (AUTO-ROSTER):")
+    print("  setup             -> Configure")
+    print("  roster [B/R] [Team] -> e.g. 'roster BLUE T1'")
     print("  b [champ]         -> Pick Blue")
     print("  r [champ]         -> Pick Red")
-    print("  ban [champ]       -> Banear")
-    print("  s b / s r         -> Sugerir PICK")
-    print("  sb b / sb r       -> Sugerir BAN")
-    print("  next              -> Siguiente Partida")
+    print("  ban [champ]       -> Ban")
+    print("  s b / s r         -> Suggest PICK")
+    print("  sb b / sb r       -> Suggest BAN")
+    print("  next              -> Next Game")
 
     while True:
         try:
@@ -955,9 +985,9 @@ def run_interactive():
             act = parts[0].lower()
 
             if act == "setup":
-                m = input("Modo (NORMAL/FEARLESS/IRONMAN): ").strip().upper() or "NORMAL"
+                m = input("Mode (NORMAL/FEARLESS/IRONMAN): ").strip().upper() or "NORMAL"
                 try:
-                    g = int(input("Número de Partidas (1-5): "))
+                    g = int(input("Number of Games (1-5): "))
                 except Exception:
                     g = 1
                 app.configure_series(m, g)
@@ -983,9 +1013,9 @@ def run_interactive():
             elif act == "exit":
                 break
             else:
-                print(f"❌ '{act}' no reconocido.")
+                print(f"'{act}' not recognized.")
         except Exception as e:
-            print(f"⚠️ Error: {e}")
+            print(f" Error: {e}")
 
 
 if __name__ == "__main__":
