@@ -18,7 +18,7 @@ export function PickSlot({ pick, ban, index, team, playerName, isActive, onClick
   return (
     <div
       onClick={onClick}
-      className={`h-[100px] border-2 bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative group transition-all ${
+      className={`h-[80px] lg:h-[100px] border-2 bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative group transition-all ${
         isActive ? "animate-smooth-pulse z-20" : "border-[#333]"
       } ${isSwapSource ? "border-yellow-500 scale-105 z-30 shadow-[0_0_20px_rgba(234,179,8,0.4)]" : ""} ${onClick ? "cursor-pointer" : ""}`}
     >

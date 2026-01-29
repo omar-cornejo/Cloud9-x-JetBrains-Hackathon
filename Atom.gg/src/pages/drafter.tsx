@@ -28,7 +28,7 @@ function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
     <img
       src={roleIconUrl(role)}
       alt={role}
-      className={`w-6 h-6 rounded ${active ? "opacity-100" : "opacity-70"}`}
+      className={`w-4 h-4 rounded ${active ? "opacity-100" : "opacity-70"}`}
     />
   );
 }
@@ -50,6 +50,7 @@ function Drafter({ config, onBack }: DrafterProps) {
   const [mlSuggest, setMlSuggest] = useState<MlSuggestPayload | null>(null);
   const [mlError, setMlError] = useState<string | null>(null);
   const [isFinalized, setIsFinalized] = useState(false);
+  const [selectedRec, setSelectedRec] = useState<{ rec: MlRecommendation; champ: Champion | undefined } | null>(null);
 
   const [blueBans, setBlueBans] = useState<(Champion | null)[]>(Array(5).fill(null));
   const [redBans, setRedBans] = useState<(Champion | null)[]>(Array(5).fill(null));
@@ -114,12 +115,13 @@ function Drafter({ config, onBack }: DrafterProps) {
     // - `sb b` / `sb r` => recommend BANS by analyzing threats of the ENEMY side.
     const analyzeSide: "BLUE" | "RED" = isBanMode ? (mySide === "BLUE" ? "RED" : "BLUE") : mySide;
 
-    const label = isBanMode ? "Ban Suggestions" : "Pick Suggestions";
+    const label = isBanMode ? "Ban Recommendations" : "Pick Recommendations";
     return { isBanMode, mySide, analyzeSide, label };
   }, [currentTurn]);
 
   const refreshRecommendationsForTurn = useCallback(async (idx: number) => {
     try {
+      setSelectedRec(null);
       let isBanMode = false;
       let analyzeSide: "BLUE" | "RED" = "BLUE";
 
@@ -441,8 +443,8 @@ function Drafter({ config, onBack }: DrafterProps) {
   }, [redPicks, stagedChampion, currentTurn, isDraftComplete]);
 
   return (
-    <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
-      <div className="absolute top-5 left-1/2 -translate-x-1/2 text-[#3498db] font-black uppercase tracking-[0.2em] bg-[#1a1a1a] px-6 py-1.5 border-2 border-[#333] rounded-full text-xs shadow-xl z-10">
+    <div className="flex flex-col h-full w-full p-3 lg:p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
+      <div className="absolute top-2 lg:top-4 left-1/2 -translate-x-1/2 text-[#3498db] font-black uppercase tracking-[0.2em] bg-[#1a1a1a] px-6 py-1.5 border-2 border-[#333] rounded-full text-[10px] lg:text-xs shadow-xl z-10">
         Game {gameNumber} / {config.numGames} <span className="mx-2 text-[#444]">|</span> {config.mode} Mode
       </div>
 
@@ -510,12 +512,12 @@ function Drafter({ config, onBack }: DrafterProps) {
         </div>
       )}
 
-      <div className="flex justify-between items-start mb-8">
+      <div className="flex justify-between items-start mb-2">
         <div className="flex flex-col gap-2">
-          <div className="text-lg font-bold uppercase tracking-widest text-[#3498db]">
+          <div className="text-base font-bold uppercase tracking-widest text-[#3498db]">
             {blueTeamName} <span className="text-[#666]">bans</span>
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1">
             {effectiveBlueBans.map((ban, i) => (
               <BanSlot
                 key={i}
@@ -526,7 +528,7 @@ function Drafter({ config, onBack }: DrafterProps) {
           </div>
           <button
             onClick={onBack}
-            className="mt-2 flex items-center justify-center gap-2 px-3 py-1.5 bg-[#1a1a1a] border border-[#333] rounded-lg text-[10px] font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group w-fit"
+            className="mt-1 flex items-center justify-center gap-2 px-2 py-1 bg-[#1a1a1a] border border-[#333] rounded text-[10px] font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group w-fit"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -555,10 +557,10 @@ function Drafter({ config, onBack }: DrafterProps) {
         />
 
         <div className="flex flex-col gap-2">
-          <div className="text-lg font-bold uppercase tracking-widest text-right text-[#e74c3c]">
+          <div className="text-base font-bold uppercase tracking-widest text-right text-[#e74c3c]">
             {redTeamName} <span className="text-[#666]">bans</span>
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1">
             {effectiveRedBans.map((ban, i) => (
               <BanSlot
                 key={i}
@@ -570,12 +572,12 @@ function Drafter({ config, onBack }: DrafterProps) {
         </div>
       </div>
 
-      <div className="flex flex-1 justify-between gap-8 min-h-0">
-        <div className="flex flex-col gap-5 w-[220px]">
+      <div className="flex flex-1 justify-between gap-4 min-h-0">
+        <div className="flex flex-col gap-3 w-[200px] lg:w-[240px]">
           {mlSuggest && typeof mlSuggest.blue_winrate === "number" && (
-            <div className="flex flex-col items-center p-2 bg-[#1a1a1a] border border-[#333] rounded-lg mb-[-10px]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-[#666]">Blue Winrate</span>
-              <span className="text-xl font-black text-[#3498db]">{(mlSuggest.blue_winrate * 100).toFixed(1)}%</span>
+            <div className="flex flex-col items-center p-1.5 bg-[#1a1a1a] border border-[#333] rounded mb-[-8px] z-10">
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#666]">Blue Winrate</span>
+              <span className="text-lg font-black text-[#3498db]">{(mlSuggest.blue_winrate * 100).toFixed(1)}%</span>
             </div>
           )}
           {effectiveBluePicks.map((pick, i) => (
@@ -592,18 +594,18 @@ function Drafter({ config, onBack }: DrafterProps) {
           ))}
         </div>
 
-        <div className="flex-1 flex flex-col gap-5 min-w-0">
-          <div className="flex flex-col items-end gap-3">
+        <div className="flex-1 flex flex-col gap-2 min-w-0">
+          <div className="flex flex-col items-end">
             <input
               type="text"
-              placeholder="Search champion..."
+              placeholder="Search..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest"
+              className="w-[130px] h-[26px] border border-[#444] bg-[#252525] px-3 text-[11px] focus:outline-none focus:border-[#3498db] transition-colors rounded uppercase font-bold tracking-widest"
             />
           </div>
-          <div className="flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
+          <div className="flex-[2.1] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-2 relative no-scrollbar rounded shadow-inner">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(50px,1fr))] gap-3">
               {filteredChampions.map((champ) => (
                 <ChampionCard
                   key={champ.id}
@@ -618,129 +620,148 @@ function Drafter({ config, onBack }: DrafterProps) {
           <button
             onClick={() => stagedChampion && handleSelectChampion(stagedChampion)}
             disabled={!stagedChampion}
-            className={`w-full py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
+            className={`w-full py-2.5 rounded font-black uppercase tracking-[0.2em] text-sm transition-all transform active:scale-95 ${
               stagedChampion 
-                ? "bg-[#3498db] hover:bg-[#2980b9] text-white shadow-[0_0_20px_rgba(52,152,219,0.3)]" 
+                ? "bg-[#3498db] hover:bg-[#2980b9] text-white shadow-[0_0_15px_rgba(52,152,219,0.3)]" 
                 : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
             }`}
           >
             Confirm
           </button>
-          <div className="flex-1 border-2 border-[#333] bg-[#1a1a1a] flex items-center justify-center rounded-lg">
-            <div className="w-full h-full p-4 flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs">
-                  {suggestContext.label} ({suggestContext.mySide}{suggestContext.isBanMode ? ` vs ${suggestContext.analyzeSide}` : ""})
-                </div>
-                <button
-                  onClick={() => refreshRecommendations()}
-                  className="px-3 py-1 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+          <div className="flex-[1.4] border-2 border-[#333] bg-[#1a1a1a] rounded overflow-hidden relative">
+            {selectedRec ? (
+              <div className="absolute inset-0 bg-black/90 p-4 flex flex-col gap-4 animate-in fade-in duration-300 z-20">
+                <button 
+                  onClick={() => setSelectedRec(null)}
+                  className="absolute top-2 right-2 px-3 py-1 bg-[#252525] border border-[#444] rounded text-[10px] font-bold uppercase tracking-widest text-white hover:bg-[#333] transition-colors"
                 >
-                  Refresh
+                  Back
                 </button>
-              </div>
-
-              {mlSuggest && (
-                <div className="text-[10px] font-bold uppercase tracking-widest text-[#444]">
-                  ML: {mlSuggest.target_side} {mlSuggest.is_ban_mode ? "BAN" : "PICK"}
-                </div>
-              )}
-
-              {mlSuggest && typeof mlSuggest.blue_winrate === "number" && typeof mlSuggest.red_winrate === "number" && (
-                <div className="text-[10px] font-black uppercase tracking-widest text-[#555]">
-                  Winrate: <span className="text-[#3498db]">{blueTeamName}</span> {(mlSuggest.blue_winrate * 100).toFixed(1)}% |{" "}
-                  <span className="text-[#e74c3c]">{redTeamName}</span> {(mlSuggest.red_winrate * 100).toFixed(1)}%
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                {UI_ROLES.map((role) => (
-                  <button
-                    key={role}
-                    onClick={() => setSelectedRole(role)}
-                    className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                      selectedRole === role
-                        ? "bg-[#3498db] border-[#3498db] text-white"
-                        : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
-                    }`}
-                    title={role}
-                  >
-                    <RoleIcon role={role} active={selectedRole === role} />
-                    {role === "MIDDLE" ? "MID" : role === "BOTTOM" ? "ADC" : role === "UTILITY" ? "SUPPORT" : role === "ALL" ? "TODOS" : role}
-                  </button>
-                ))}
-              </div>
-
-              {mlError && (
-                <div className="text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
-                  {mlError}
-                </div>
-              )}
-
-              <div className="flex-1 overflow-y-auto no-scrollbar pr-1">
-                {mlSuggest ? (
-                  <div className="flex flex-col gap-2">
-                    {visibleRecommendations.map(({ rec, champ }) => {
-                      return (
-                        <div
-                          key={`${selectedRole}-${rec.champion}`}
-                          className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
-                          onClick={() => {
-                            if (champ) {
-                              setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
-                            }
-                          }}
-                        >
-                          {champ ? (
-                            <img
-                              src={champ.icon}
-                              alt={champ.name}
-                              className="w-10 h-10 border border-[#333]"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 border border-[#333] bg-[#222]" />
-                          )}
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="truncate font-black uppercase tracking-wide text-sm">
-                                {champ ? champ.name : rec.champion}
-                              </div>
-                              <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
-                                {(rec.score * 100).toFixed(1)}%
-                              </div>
-                            </div>
-                            {rec.tactical && (
-                              <div className="text-[10px] text-[#aaa] mt-1 leading-snug">
-                                {rec.tactical}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {visibleRecommendations.length === 0 && (
-                      <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
-                        No recommendations
-                      </div>
-                    )}
+                
+                <div className="flex items-center gap-4 mt-2">
+                  {selectedRec.champ ? (
+                    <img
+                      src={selectedRec.champ.icon}
+                      alt={selectedRec.champ.name}
+                      className="w-16 h-16 border-2 border-[#3498db] rounded-lg shadow-lg"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 border-2 border-[#3498db] bg-[#222] rounded-lg" />
+                  )}
+                  <div className="flex flex-col">
+                    <div className="text-xl font-black uppercase tracking-wider">
+                      {selectedRec.champ ? selectedRec.champ.name : selectedRec.rec.champion}
+                    </div>
+                    <div className="text-sm font-bold text-[#3498db] uppercase tracking-widest">
+                      {(selectedRec.rec.score * 100).toFixed(1)}% Win Rate
+                    </div>
                   </div>
-                ) : (
-                  <div className="text-[#444] text-xs font-bold uppercase tracking-widest">
-                    Waiting for ML...
+                </div>
+
+                <div className="flex-1 bg-[#1a1a1a]/80 border border-[#333] rounded-lg p-4 text-sm leading-relaxed text-gray-300 italic overflow-y-auto no-scrollbar">
+                  {selectedRec.rec.tactical || "No detailed analysis available for this champion."}
+                </div>
+              </div>
+            ) : (
+              <div className="w-full h-full p-2 flex flex-col gap-6">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-4 overflow-hidden">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-[#3498db] whitespace-nowrap">
+                      {suggestContext.label}
+                    </span>
+                    <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                      {UI_ROLES.map((role) => (
+                        <button
+                          key={role}
+                          onClick={() => {
+                            setSelectedRole(role);
+                          }}
+                          className={`px-2 py-1.5 rounded border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                            selectedRole === role
+                              ? "bg-[#3498db] border-[#3498db] text-white"
+                              : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                          }`}
+                          title={role}
+                        >
+                          <RoleIcon role={role} active={selectedRole === role} />
+                          <span className="hidden xl:inline">
+                            {role === "MIDDLE" ? "MID" : role === "BOTTOM" ? "ADC" : role === "UTILITY" ? "SUPP" : role}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => refreshRecommendations()}
+                    className="flex-shrink-0 px-2 py-1 bg-[#252525] border border-[#333] rounded text-[9px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {mlError && (
+                  <div className="text-[#e74c3c] text-[10px] font-bold uppercase tracking-widest px-1">
+                    {mlError}
                   </div>
                 )}
+
+                <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar">
+                  {mlSuggest ? (
+                    <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                      {visibleRecommendations.map(({ rec, champ }) => (
+                        <div
+                          key={`${selectedRole}-${rec.champion}`}
+                          className="group flex flex-col items-center gap-1.5 border border-[#333] bg-[#141414] rounded p-2 hover:border-[#3498db] transition-all cursor-pointer hover:bg-[#1a1a1a] hover:scale-[1.02]"
+                          onClick={() => {
+                            setSelectedRec({ rec, champ });
+                            if (champ) setStagedChampion(champ);
+                          }}
+                        >
+                          <div className="relative">
+                            {champ ? (
+                              <img
+                                src={champ.icon}
+                                alt={champ.name}
+                                className="w-10 h-10 border border-[#222] rounded shadow-md group-hover:border-[#3498db] transition-colors"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 border border-[#222] bg-[#222] rounded" />
+                            )}
+                            <div className="absolute -top-1 -right-1 bg-[#3498db] text-white text-[7px] font-black px-1 rounded border border-[#141414] shadow-sm">
+                              {(rec.score * 100).toFixed(0)}%
+                            </div>
+                          </div>
+
+                          <div className="w-full text-center">
+                            <div className="truncate font-black uppercase tracking-tighter text-[9px] text-gray-300">
+                              {champ ? champ.name : rec.champion}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      {visibleRecommendations.length === 0 && (
+                        <div className="col-span-full text-[#444] text-[10px] font-bold uppercase tracking-widest text-center py-4">
+                          No suggestions
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-[#444] text-[10px] font-bold uppercase tracking-widest animate-pulse">
+                      Waiting for ML...
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        <div className="flex flex-col gap-5 w-[220px]">
+        <div className="flex flex-col gap-3 w-[200px] lg:w-[240px]">
           {mlSuggest && typeof mlSuggest.red_winrate === "number" && (
-            <div className="flex flex-col items-center p-2 bg-[#1a1a1a] border border-[#333] rounded-lg mb-[-10px]">
-              <span className="text-[10px] font-black uppercase tracking-widest text-[#666]">Red Winrate</span>
-              <span className="text-xl font-black text-[#e74c3c]">{(mlSuggest.red_winrate * 100).toFixed(1)}%</span>
+            <div className="flex flex-col items-center p-1.5 bg-[#1a1a1a] border border-[#333] rounded mb-[-8px] z-10">
+              <span className="text-[9px] font-black uppercase tracking-widest text-[#666]">Red Winrate</span>
+              <span className="text-lg font-black text-[#e74c3c]">{(mlSuggest.red_winrate * 100).toFixed(1)}%</span>
             </div>
           )}
           {effectiveRedPicks.map((pick, i) => (
@@ -755,22 +776,22 @@ function Drafter({ config, onBack }: DrafterProps) {
               isSwapSource={swapSource?.team === "red" && swapSource.index === i}
             />
           ))}
+
+          {isDraftComplete && !isFinalized && (
+            <div className="mt-auto pt-4 animate-in slide-in-from-bottom-4 duration-500">
+              <button
+                onClick={() => setIsFinalized(true)}
+                className="w-full group relative bg-[#3498db] hover:bg-[#2980b9] text-white py-4 font-black uppercase tracking-[0.15em] rounded transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(52,152,219,0.3)] flex items-center justify-center gap-2 text-sm"
+              >
+                <span>Finalize Draft</span>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
-
-      {isDraftComplete && !isFinalized && (
-        <div className="absolute bottom-8 right-8 z-40 animate-in slide-in-from-bottom-4 duration-500">
-          <button
-            onClick={() => setIsFinalized(true)}
-            className="group relative bg-[#3498db] hover:bg-[#2980b9] text-white px-8 py-4 font-black uppercase tracking-[0.2em] rounded-lg transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(52,152,219,0.4)] flex items-center gap-3"
-          >
-            <span>Finalize Draft</span>
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-            </svg>
-          </button>
-        </div>
-      )}
     </div>
   );
 }

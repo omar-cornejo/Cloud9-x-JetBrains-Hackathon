@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "atomgg",
-        "width": 1189,
-        "height": 644,
-        "minWidth": 1189,
-        "minHeight": 644,
+        "width": 1280,
+        "height": 720,
+        "minWidth": 1280,
+        "minHeight": 720,
         "resizable": true,
         "fullscreen": false
       }

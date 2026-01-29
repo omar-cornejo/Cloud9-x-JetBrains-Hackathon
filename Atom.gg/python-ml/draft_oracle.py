@@ -795,11 +795,11 @@ class TournamentDraft:
                     )
                 )
 
-        # sort and top-5 per role
+        # sort and top-10 per role
         suggestions.sort(key=lambda s: s.score, reverse=True)
         recs: Dict[str, List[Dict[str, Any]]] = {r: [] for r in open_roles}
         for role in open_roles:
-            role_items = [s for s in suggestions if s.role == role][:5]
+            role_items = [s for s in suggestions if s.role == role][:10]
             recs[role] = [
                 {
                     "champion": s.champion,
@@ -859,12 +859,12 @@ class TournamentDraft:
         for role in open_roles:
             p_name = self.teams[target_side]["players"].get(role.lower(), "Unknown")
             print(f"\n📍 {role} ({p_name}):")
-            top_5 = df_res[df_res["Rol"] == role].head(5)
+            top_10 = df_res[df_res["Rol"] == role].head(10)
             cols = ["Campeón", "Score", "Tags", "Análisis Táctico"]
             if is_ban_mode:
                 cols = ["Campeón", "Score", "Threat", "Análisis Táctico"]
-            if not top_5.empty:
-                print(top_5[cols].to_string(index=False, formatters={"Score": "{:.1%}".format}))
+            if not top_10.empty:
+                print(top_10[cols].to_string(index=False, formatters={"Score": "{:.1%}".format}))
 
     def _resolve_name(self, text: str) -> Optional[str]:
         matches = [k for k in self.name_to_id.keys() if text.lower() in k]
