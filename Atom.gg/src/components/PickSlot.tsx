@@ -6,15 +6,21 @@ interface PickSlotProps {
   index: number;
   team: "blue" | "red";
   playerName?: string;
+  isActive?: boolean;
+  onClick?: () => void;
+  isSwapSource?: boolean;
 }
 
-export function PickSlot({ pick, ban, index, team, playerName }: PickSlotProps) {
+export function PickSlot({ pick, ban, index, team, playerName, isActive, onClick, isSwapSource }: PickSlotProps) {
   const isBlue = team === "blue";
   const borderClass = isBlue ? "border-l-[#3498db] border-l-[5px]" : "border-r-[#e74c3c] border-r-[5px]";
 
   return (
     <div
-      className={`h-[100px] border-2 border-[#333] bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative group transition-all`}
+      onClick={onClick}
+      className={`h-[100px] border-2 bg-[#1a1a1a] flex items-center shadow-[0_4px_6px_rgba(0,0,0,0.3)] ${borderClass} relative group transition-all ${
+        isActive ? "animate-smooth-pulse z-20" : "border-[#333]"
+      } ${isSwapSource ? "border-yellow-500 scale-105 z-30 shadow-[0_0_20px_rgba(234,179,8,0.4)]" : ""} ${onClick ? "cursor-pointer" : ""}`}
     >
       {ban && (
         <div className={`absolute bottom-0 ${isBlue ? 'right-0 translate-x-1/2 translate-y-1/2' : 'left-0 -translate-x-1/2 translate-y-1/2'} z-20`}>

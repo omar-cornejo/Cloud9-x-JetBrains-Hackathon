@@ -11,3 +11,57 @@
     scrollbar-width: none;
   }
 }
+
+@keyframes smooth-pulse {
+  0%, 100% {
+    opacity: 1;
+    border-color: rgba(52, 152, 219, 1);
+    box-shadow: 0 0 15px rgba(52, 152, 219, 0.4);
+  }
+  50% {
+    opacity: 0.8;
+    border-color: rgba(52, 152, 219, 0.6);
+    box-shadow: 0 0 25px rgba(52, 152, 219, 0.7);
+  }
+}
+
+.animate-smooth-pulse {
+  animation: smooth-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes slide-in-bottom {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-duration: 0.5s;
+  animation-fill-mode: both;
+}
+
+.duration-500 {
+  animation-duration: 0.5s;
+}
+
+.duration-300 {
+  animation-duration: 0.3s;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: slide-in-bottom;
+}

@@ -676,6 +676,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                   </div>
                 )}
 
+                {activeMlSuggest && typeof activeMlSuggest.blue_winrate === "number" && typeof activeMlSuggest.red_winrate === "number" && (
+                  <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-[#555]">
+                    Winrate: <span className="text-[#3498db]">BLUE</span> {(activeMlSuggest.blue_winrate * 100).toFixed(1)}% |{" "}
+                    <span className="text-[#e74c3c]">RED</span> {(activeMlSuggest.red_winrate * 100).toFixed(1)}%
+                  </div>
+                )}
+
                 <div className="mt-3 flex gap-2 flex-wrap">
                   {UI_ROLES.map((role) => (
                     <button

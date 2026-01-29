@@ -49,11 +49,14 @@ function Drafter({ config, onBack }: DrafterProps) {
   const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
   const [mlSuggest, setMlSuggest] = useState<MlSuggestPayload | null>(null);
   const [mlError, setMlError] = useState<string | null>(null);
+  const [isFinalized, setIsFinalized] = useState(false);
 
   const [blueBans, setBlueBans] = useState<(Champion | null)[]>(Array(5).fill(null));
   const [redBans, setRedBans] = useState<(Champion | null)[]>(Array(5).fill(null));
   const [bluePicks, setBluePicks] = useState<(Champion | null)[]>(Array(5).fill(null));
   const [redPicks, setRedPicks] = useState<(Champion | null)[]>(Array(5).fill(null));
+
+  const [swapSource, setSwapSource] = useState<{ team: "blue" | "red"; index: number } | null>(null);
 
   const [team1Players, setTeam1Players] = useState<TeamPlayers | null>(null);
   const [team2Players, setTeam2Players] = useState<TeamPlayers | null>(null);
@@ -310,6 +313,41 @@ function Drafter({ config, onBack }: DrafterProps) {
     [currentTurn, allLockedNames, refreshRecommendationsForTurn]
   );
 
+  const isDraftComplete = currentTurn >= DRAFT_SEQUENCE.length;
+  const isDraftFinalized = isFinalized && isDraftComplete;
+  const hasMoreGames = gameNumber < config.numGames;
+
+  const handleSwap = useCallback((team: "blue" | "red", index: number) => {
+    // Swapping is now allowed even during the draft as long as both slots have champions
+    // (though in practice it's most useful when many champions are picked)
+    
+    if (swapSource) {
+      if (swapSource.team === team) {
+        if (swapSource.index !== index) {
+          // Perform swap within the same team
+          const setPicks = team === "blue" ? setBluePicks : setRedPicks;
+          setPicks((prev) => {
+            const next = [...prev];
+            const temp = next[swapSource.index];
+            next[swapSource.index] = next[index];
+            next[index] = temp;
+            return next;
+          });
+        }
+        setSwapSource(null);
+      } else {
+        // Switch source to the new team/slot
+        setSwapSource({ team, index });
+      }
+    } else {
+      // Only allow selecting a non-null pick as source
+      const currentPicks = team === "blue" ? bluePicks : redPicks;
+      if (currentPicks[index]) {
+        setSwapSource({ team, index });
+      }
+    }
+  }, [bluePicks, redPicks, swapSource]);
+
   const handleNextGame = () => {
     const newLocked = new Set(globalLockedChampions);
 
@@ -338,6 +376,8 @@ function Drafter({ config, onBack }: DrafterProps) {
     setRedBans(Array(5).fill(null));
     setBluePicks(Array(5).fill(null));
     setRedPicks(Array(5).fill(null));
+    setSwapSource(null);
+    setIsFinalized(false);
     setCurrentTurn(0);
     setTimeLeft(30);
     setSearchTerm("");
@@ -355,9 +395,6 @@ function Drafter({ config, onBack }: DrafterProps) {
     }
     return filtered;
   }, [champions, searchTerm]);
-
-  const isDraftComplete = currentTurn >= DRAFT_SEQUENCE.length;
-  const hasMoreGames = gameNumber < config.numGames;
 
   const effectiveBlueBans = useMemo(() => {
     if (!stagedChampion || isDraftComplete) return blueBans;
@@ -409,7 +446,7 @@ function Drafter({ config, onBack }: DrafterProps) {
         Game {gameNumber} / {config.numGames} <span className="mx-2 text-[#444]">|</span> {config.mode} Mode
       </div>
 
-      {isDraftComplete && (
+      {isDraftFinalized && (
         <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 animate-in fade-in duration-300">
           <div className="bg-[#1a1a1a] p-12 border-2 border-[#3498db] rounded-2xl flex flex-col items-center gap-8 shadow-[0_0_50px_rgba(52,152,219,0.2)]">
             <div className="flex flex-col items-center gap-2">
@@ -480,7 +517,11 @@ function Drafter({ config, onBack }: DrafterProps) {
           </div>
           <div className="flex gap-1.5">
             {effectiveBlueBans.map((ban, i) => (
-              <BanSlot key={i} ban={ban} />
+              <BanSlot
+                key={i}
+                ban={ban}
+                isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "ban" && DRAFT_SEQUENCE[currentTurn].index === i}
+              />
             ))}
           </div>
           <button
@@ -519,7 +560,11 @@ function Drafter({ config, onBack }: DrafterProps) {
           </div>
           <div className="flex gap-1.5">
             {effectiveRedBans.map((ban, i) => (
-              <BanSlot key={i} ban={ban} />
+              <BanSlot
+                key={i}
+                ban={ban}
+                isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "ban" && DRAFT_SEQUENCE[currentTurn].index === i}
+              />
             ))}
           </div>
         </div>
@@ -527,14 +572,23 @@ function Drafter({ config, onBack }: DrafterProps) {
 
       <div className="flex flex-1 justify-between gap-8 min-h-0">
         <div className="flex flex-col gap-5 w-[220px]">
+          {mlSuggest && typeof mlSuggest.blue_winrate === "number" && (
+            <div className="flex flex-col items-center p-2 bg-[#1a1a1a] border border-[#333] rounded-lg mb-[-10px]">
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#666]">Blue Winrate</span>
+              <span className="text-xl font-black text-[#3498db]">{(mlSuggest.blue_winrate * 100).toFixed(1)}%</span>
+            </div>
+          )}
           {effectiveBluePicks.map((pick, i) => (
-            <PickSlot
-              key={i}
-              pick={pick}
-              index={i}
-              team="blue"
-              playerName={getPlayerName("blue", i)}
-            />
+              <PickSlot
+                key={i}
+                pick={pick}
+                index={i}
+                team="blue"
+                playerName={getPlayerName("blue", i)}
+                isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
+                onClick={() => handleSwap("blue", i)}
+                isSwapSource={swapSource?.team === "blue" && swapSource.index === i}
+              />
           ))}
         </div>
 
@@ -589,6 +643,13 @@ function Drafter({ config, onBack }: DrafterProps) {
               {mlSuggest && (
                 <div className="text-[10px] font-bold uppercase tracking-widest text-[#444]">
                   ML: {mlSuggest.target_side} {mlSuggest.is_ban_mode ? "BAN" : "PICK"}
+                </div>
+              )}
+
+              {mlSuggest && typeof mlSuggest.blue_winrate === "number" && typeof mlSuggest.red_winrate === "number" && (
+                <div className="text-[10px] font-black uppercase tracking-widest text-[#555]">
+                  Winrate: <span className="text-[#3498db]">{blueTeamName}</span> {(mlSuggest.blue_winrate * 100).toFixed(1)}% |{" "}
+                  <span className="text-[#e74c3c]">{redTeamName}</span> {(mlSuggest.red_winrate * 100).toFixed(1)}%
                 </div>
               )}
 
@@ -676,6 +737,12 @@ function Drafter({ config, onBack }: DrafterProps) {
         </div>
 
         <div className="flex flex-col gap-5 w-[220px]">
+          {mlSuggest && typeof mlSuggest.red_winrate === "number" && (
+            <div className="flex flex-col items-center p-2 bg-[#1a1a1a] border border-[#333] rounded-lg mb-[-10px]">
+              <span className="text-[10px] font-black uppercase tracking-widest text-[#666]">Red Winrate</span>
+              <span className="text-xl font-black text-[#e74c3c]">{(mlSuggest.red_winrate * 100).toFixed(1)}%</span>
+            </div>
+          )}
           {effectiveRedPicks.map((pick, i) => (
             <PickSlot
               key={i}
@@ -683,10 +750,27 @@ function Drafter({ config, onBack }: DrafterProps) {
               index={i}
               team="red"
               playerName={getPlayerName("red", i)}
+              isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
+              onClick={() => handleSwap("red", i)}
+              isSwapSource={swapSource?.team === "red" && swapSource.index === i}
             />
           ))}
         </div>
       </div>
+
+      {isDraftComplete && !isFinalized && (
+        <div className="absolute bottom-8 right-8 z-40 animate-in slide-in-from-bottom-4 duration-500">
+          <button
+            onClick={() => setIsFinalized(true)}
+            className="group relative bg-[#3498db] hover:bg-[#2980b9] text-white px-8 py-4 font-black uppercase tracking-[0.2em] rounded-lg transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(52,152,219,0.4)] flex items-center gap-3"
+          >
+            <span>Finalize Draft</span>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

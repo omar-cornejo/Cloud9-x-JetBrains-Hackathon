@@ -41,13 +41,20 @@ class TournamentDraft:
     ):
         self.quiet = quiet
 
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        def abs_path(p: str) -> str:
+            if not p:
+                return p
+            return p if os.path.isabs(p) else os.path.join(base_dir, p)
+
         # --- CONFIG ---
-        self.MODEL_FILE = model_file
-        self.FEATURE_FILE = feature_file
-        self.PRO_SIG_FILE = pro_sig_file
-        self.TOURNAMENT_META_FILE = tournament_meta_file
-        self.SYNERGY_FILE = synergy_file
-        self.DB_FILE = db_file
+        self.MODEL_FILE = abs_path(model_file)
+        self.FEATURE_FILE = abs_path(feature_file)
+        self.PRO_SIG_FILE = abs_path(pro_sig_file)
+        self.TOURNAMENT_META_FILE = abs_path(tournament_meta_file)
+        self.SYNERGY_FILE = abs_path(synergy_file)
+        self.DB_FILE = abs_path(db_file)
 
         if not self.quiet:
             print("⚙️  Cargando Tournament Suite V9.5 (SQL Preserved + Meta)...")
@@ -102,6 +109,10 @@ class TournamentDraft:
         self._prepare_role_solver()
         self._prepare_model_cols()
 
+        self._feature_lookup: Dict[Tuple[int, str], Dict[str, float]] = {}
+        self._pos_means: Dict[str, Dict[str, float]] = {}
+        self._prepare_feature_lookup()
+
         # SERIES STATE
         self.series_config = {"mode": "NORMAL", "total_games": 1, "current_game": 1}
         self.history: List[Dict[str, Any]] = []
@@ -112,6 +123,230 @@ class TournamentDraft:
         }
 
         self.reset_game_board()
+
+    def _prepare_feature_lookup(self) -> None:
+        # Cache per-(champ_id, position) feature rows for fast lookup.
+        # The feature store is the single source of truth for per-champion stats.
+        ignore = {"champ_id", "position", "region"}
+        feature_cols = [c for c in self.df.columns if c not in ignore]
+
+        for row in self.df.select(["champ_id", "position", *feature_cols]).to_dicts():
+            champ_id = int(row["champ_id"])
+            position = str(row["position"])
+            self._feature_lookup[(champ_id, position)] = {
+                k: (0.0 if row.get(k) is None else float(row[k])) for k in feature_cols
+            }
+
+        # Precompute global per-position means so we can predict during partial drafts.
+        for pos in ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY", ""]:
+            pos_df = self.df.filter(pl.col("position") == pos)
+            if pos_df.height == 0:
+                self._pos_means[pos] = {k: 0.0 for k in feature_cols}
+                continue
+
+            mean_row = pos_df.select(feature_cols).mean().to_dicts()[0]
+            self._pos_means[pos] = {k: float(mean_row.get(k) or 0.0) for k in feature_cols}
+
+    def _champ_id(self, champ_name: str) -> Optional[int]:
+        if not champ_name:
+            return None
+        return self.name_to_id.get(champ_name.lower())
+
+    def _get_features_for_slot(self, champ_name: Optional[str], position: str) -> Dict[str, float]:
+        """Return feature dict for a given slot.
+
+        If champion is missing/unknown, returns per-position global means.
+        """
+
+        if champ_name:
+            champ_id = self._champ_id(champ_name)
+            if champ_id is not None:
+                row = self._feature_lookup.get((champ_id, position))
+                if row is not None:
+                    return row
+        return self._pos_means.get(position, {})
+
+    def predict_live_winrate(self) -> Dict[str, float]:
+        """Predict BLUE/RED winrate for the current draft state.
+
+        This uses the same trained XGBoost model as the oracle, and is designed to work
+        even during partial drafts by filling missing roles with global means.
+        """
+
+        feature_names = list(self.model.feature_names or [])
+        if not feature_names:
+            return {"blue": 0.5, "red": 0.5}
+
+        roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+        blue_assign = self._solve_roles(self.blue_picks)
+        red_assign = self._solve_roles(self.red_picks)
+
+        blue_role_to_champ = {role: champ for champ, role in blue_assign.items()}
+        red_role_to_champ = {role: champ for champ, role in red_assign.items()}
+
+        # Base per-slot columns we can map directly from the feature store.
+        slot_cols = [
+            "stat_dpm",
+            "stat_gpm",
+            "stat_dmg_taken",
+            "stat_mitigated",
+            "stat_heal",
+            "stat_hard_cc",
+            "stat_vision_score",
+            "z_style_roaming_tendency",
+            "z_style_lane_dominance",
+            "z_style_gank_heaviness",
+            "z_style_objective_control",
+            "z_style_invade_pressure",
+            "z_style_gold_hunger",
+        ]
+
+        feats: Dict[str, float] = {k: 0.0 for k in feature_names}
+
+        def set_if_present(key: str, val: float) -> None:
+            if key in feats:
+                feats[key] = float(val)
+
+        def compute_side(side: str, role_to_champ: Dict[str, str]) -> Dict[str, Dict[str, float]]:
+            side_slots: Dict[str, Dict[str, float]] = {}
+            for r in roles:
+                side_slots[r] = self._get_features_for_slot(role_to_champ.get(r), r)
+            return side_slots
+
+        blue_slots = compute_side("blue", blue_role_to_champ)
+        red_slots = compute_side("red", red_role_to_champ)
+
+        # Per-role features
+        for r in roles:
+            for col in slot_cols:
+                set_if_present(f"blue_{r}_{col}", blue_slots[r].get(col, 0.0))
+                set_if_present(f"red_{r}_{col}", red_slots[r].get(col, 0.0))
+
+        # Team-level "__" aggregates (mean across roles)
+        for col in slot_cols:
+            blue_mean = float(np.mean([blue_slots[r].get(col, 0.0) for r in roles]))
+            red_mean = float(np.mean([red_slots[r].get(col, 0.0) for r in roles]))
+            set_if_present(f"blue__{col}", blue_mean)
+            set_if_present(f"red__{col}", red_mean)
+
+        # Team totals/ratios derived from per-slot stats.
+        # We compute totals across the 5 roles (missing roles filled with means).
+        def sum_side(col: str, side_slots: Dict[str, Dict[str, float]]) -> float:
+            return float(sum(side_slots[r].get(col, 0.0) for r in roles))
+
+        # Damage types
+        blue_magic = sum_side("avg_magic_dmg", blue_slots)
+        blue_phys = sum_side("avg_phys_dmg", blue_slots)
+        blue_true = sum_side("avg_true_dmg", blue_slots)
+        red_magic = sum_side("avg_magic_dmg", red_slots)
+        red_phys = sum_side("avg_phys_dmg", red_slots)
+        red_true = sum_side("avg_true_dmg", red_slots)
+
+        set_if_present("blue_total_magic_dmg", blue_magic)
+        set_if_present("blue_total_phys_dmg", blue_phys)
+        set_if_present("blue_total_true_dmg", blue_true)
+        set_if_present("red_total_magic_dmg", red_magic)
+        set_if_present("red_total_phys_dmg", red_phys)
+        set_if_present("red_total_true_dmg", red_true)
+
+        set_if_present(
+            "blue_magic_dmg_ratio",
+            blue_magic / max(1e-9, (blue_magic + blue_phys + blue_true)),
+        )
+        set_if_present(
+            "red_magic_dmg_ratio",
+            red_magic / max(1e-9, (red_magic + red_phys + red_true)),
+        )
+
+        # Tankiness/sustain/cc proxies
+        blue_tank = sum_side("stat_dmg_taken", blue_slots) + sum_side("stat_mitigated", blue_slots)
+        red_tank = sum_side("stat_dmg_taken", red_slots) + sum_side("stat_mitigated", red_slots)
+        set_if_present("blue_total_tankiness", blue_tank)
+        set_if_present("red_total_tankiness", red_tank)
+        set_if_present("blue_total_sustain", sum_side("stat_heal", blue_slots))
+        set_if_present("red_total_sustain", sum_side("stat_heal", red_slots))
+        set_if_present("blue_total_cc", sum_side("stat_hard_cc", blue_slots))
+        set_if_present("red_total_cc", sum_side("stat_hard_cc", red_slots))
+
+        # Strategy proxies (best-effort)
+        set_if_present(
+            "blue_strat_gank_compatibility",
+            float(np.mean([blue_slots[r].get("z_style_gank_heaviness", 0.0) for r in roles])),
+        )
+        set_if_present(
+            "red_strat_gank_compatibility",
+            float(np.mean([red_slots[r].get("z_style_gank_heaviness", 0.0) for r in roles])),
+        )
+        set_if_present(
+            "blue_strat_resource_friction",
+            float(np.std([blue_slots[r].get("z_style_gold_hunger", 0.0) for r in roles])),
+        )
+        set_if_present(
+            "red_strat_resource_friction",
+            float(np.std([red_slots[r].get("z_style_gold_hunger", 0.0) for r in roles])),
+        )
+        set_if_present(
+            "blue_strat_invade_safety",
+            float(np.mean([blue_slots[r].get("z_style_invade_pressure", 0.0) for r in roles])),
+        )
+        set_if_present(
+            "red_strat_invade_safety",
+            float(np.mean([red_slots[r].get("z_style_invade_pressure", 0.0) for r in roles])),
+        )
+
+        # Team volatility (proxy)
+        def team_vol(side_slots: Dict[str, Dict[str, float]]) -> float:
+            cols = ["var_gold_volatility", "var_damage_volatility", "var_lane_stability"]
+            per_role = [float(sum(side_slots[r].get(c, 0.0) for c in cols)) for r in roles]
+            return float(np.mean(per_role))
+
+        set_if_present("diff_team_volatility", team_vol(blue_slots) - team_vol(red_slots))
+
+        # Synergy features (baseline 0.5 if unknown)
+        def duo_syn(role_a: str, role_b: str, role_to_champ: Dict[str, str]) -> float:
+            a = role_to_champ.get(role_a)
+            b = role_to_champ.get(role_b)
+            if not a or not b:
+                return 0.5
+            a_id = self._champ_id(a)
+            b_id = self._champ_id(b)
+            if a_id is None or b_id is None:
+                return 0.5
+            return float(self.synergy_map.get((a_id, b_id), 0.5))
+
+        blue_syn_mid_jg = duo_syn("MIDDLE", "JUNGLE", blue_role_to_champ)
+        blue_syn_bot_duo = duo_syn("BOTTOM", "UTILITY", blue_role_to_champ)
+        blue_syn_top_jg = duo_syn("TOP", "JUNGLE", blue_role_to_champ)
+        red_syn_mid_jg = duo_syn("MIDDLE", "JUNGLE", red_role_to_champ)
+        red_syn_bot_duo = duo_syn("BOTTOM", "UTILITY", red_role_to_champ)
+        red_syn_top_jg = duo_syn("TOP", "JUNGLE", red_role_to_champ)
+
+        set_if_present("blue_syn_mid_jg", blue_syn_mid_jg)
+        set_if_present("blue_syn_bot_duo", blue_syn_bot_duo)
+        set_if_present("blue_syn_top_jg", blue_syn_top_jg)
+        set_if_present("red_syn_mid_jg", red_syn_mid_jg)
+        set_if_present("red_syn_bot_duo", red_syn_bot_duo)
+        set_if_present("red_syn_top_jg", red_syn_top_jg)
+        set_if_present("gap_syn_mid_jg", blue_syn_mid_jg - red_syn_mid_jg)
+
+        # Duel features
+        duel_cols = [
+            ("stat_gpm", "duel_{r}_stat_gpm"),
+            ("stat_dpm", "duel_{r}_stat_dpm"),
+            ("z_style_lane_dominance", "duel_{r}_z_style_lane_dominance"),
+        ]
+        for r in roles:
+            for src, tmpl in duel_cols:
+                key = tmpl.format(r=r)
+                set_if_present(key, blue_slots[r].get(src, 0.0) - red_slots[r].get(src, 0.0))
+
+        # Build row in the exact feature order.
+        row = np.array([[feats.get(name, 0.0) for name in feature_names]], dtype=np.float32)
+        dm = xgb.DMatrix(row, feature_names=feature_names)
+
+        pred = float(self.model.predict(dm)[0])
+        pred = max(0.0, min(1.0, pred))
+        return {"blue": pred, "red": 1.0 - pred}
 
     # --- SUPPORT ---
     def _load_api(self):
@@ -297,22 +532,13 @@ class TournamentDraft:
         return 0.0, ""
 
     def predict_final_matchup(self):
-        # Kept as-is (placeholder heuristic)
-        if len(self.blue_picks) < 5 or len(self.red_picks) < 5:
-            if not self.quiet:
-                print("⚠️ Faltan picks para predecir el resultado final.")
-            return
+        # Real model prediction.
+        wr = self.predict_live_winrate()
 
         if not self.quiet:
             print("\n⚖️  CALCULANDO PREDICCIÓN FINAL DEL PARTIDO...")
-
-        import random
-
-        base_wr = 0.50 + (random.uniform(-0.08, 0.08))
-
-        if not self.quiet:
-            print(f"📊 Probabilidad de Victoria BLUE: {base_wr:.1%}")
-            if base_wr > 0.5:
+            print(f"📊 Probabilidad de Victoria BLUE: {wr['blue']:.1%}")
+            if wr["blue"] > 0.5:
                 print("🚀 PREDICCIÓN: GANA BLUE TEAM")
             else:
                 print("🚀 PREDICCIÓN: GANA RED TEAM")
@@ -483,11 +709,14 @@ class TournamentDraft:
         if not open_roles:
             # As before, if there are no open roles, do final prediction (placeholder)
             self.predict_final_matchup()
+            wr = self.predict_live_winrate()
             return {
                 "target_side": target_side,
                 "is_ban_mode": is_ban_mode,
                 "open_roles": [],
                 "recommendations": {},
+                "blue_winrate": wr["blue"],
+                "red_winrate": wr["red"],
                 "blocked_count": self.get_blocked_count(),
                 "mode": self.series_config["mode"],
                 "game": self.series_config["current_game"],
@@ -582,12 +811,15 @@ class TournamentDraft:
                 for s in role_items
             ]
 
+        wr = self.predict_live_winrate()
         return {
             "target_side": target_side,
             "is_ban_mode": is_ban_mode,
             "open_roles": open_roles,
             "inferred_open_roles": inferred_open_roles,
             "recommendations": recs,
+            "blue_winrate": wr["blue"],
+            "red_winrate": wr["red"],
             "blocked_count": self.get_blocked_count(),
             "mode": self.series_config["mode"],
             "game": self.series_config["current_game"],

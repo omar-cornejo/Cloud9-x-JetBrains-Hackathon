@@ -14,6 +14,8 @@ export interface MlSuggestPayload {
   open_roles: MlRole[];
   inferred_open_roles?: MlRole[];
   recommendations: Record<MlRole, MlRecommendation[]>;
+  blue_winrate?: number;
+  red_winrate?: number;
   blocked_count: number;
   mode: string;
   game: number;
