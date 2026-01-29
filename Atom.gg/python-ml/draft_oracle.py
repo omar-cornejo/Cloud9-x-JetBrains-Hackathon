@@ -621,7 +621,7 @@ class TournamentDraft:
 
     # --- GAME STATE ---
     def configure_series(self, mode: str, total_games: int):
-        modes = {"NORMAL": "NORMAL", "FEARLESS": "FEARLESS", "IRONMAN": "IRONMAN"}
+        modes = {"NORMAL": "NORMAL", "FEARLESS": "FEARLESS", "IRONMAN": "IRONMAN", "SOLOQ": "SOLOQ"}
         self.series_config["mode"] = modes.get(mode.upper(), "NORMAL")
         self.series_config["total_games"] = max(1, min(5, int(total_games)))
         self.history = []
@@ -779,6 +779,12 @@ class TournamentDraft:
                 base_score = row["stat_winrate"]
                 pro_bonus, pro_note, pro_games = self.get_pro_bias(p_name, display_name)
                 meta_bonus, meta_note = self.get_tournament_bias(c_name)
+
+                # If SOLOQ mode, we skip pro/tournament biases
+                if self.series_config["mode"] == "SOLOQ":
+                    pro_bonus, meta_bonus = 0.0, 0.0
+                    pro_note, meta_note = "", ""
+
                 final_score = base_score + pro_bonus + meta_bonus
                 final_score = min(1.0, final_score)
 

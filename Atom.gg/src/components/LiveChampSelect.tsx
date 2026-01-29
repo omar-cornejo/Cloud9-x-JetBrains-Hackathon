@@ -7,9 +7,31 @@ import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
 import { NoActiveDraft } from "./NoActiveDraft";
+import "../pages/drafter.css";
 
 const ALL_ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 const UI_ROLES: MlRole[] = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+
+function roleIconUrl(role: MlRole): string {
+  const lane =
+    role === "TOP" ? "top" :
+    role === "JUNGLE" ? "jungle" :
+    role === "MIDDLE" ? "middle" :
+    role === "BOTTOM" ? "bottom" :
+    role === "UTILITY" ? "utility" :
+    "fill";
+  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-${lane}.png`;
+}
+
+function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
+  return (
+    <img
+      src={roleIconUrl(role)}
+      alt={role}
+      className={`w-4 h-4 rounded ${active ? "opacity-100" : "opacity-70"}`}
+    />
+  );
+}
 
 interface LiveChampSelectProps {
   onBack: () => void;
@@ -67,49 +89,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     [championById, championByName]
   );
 
-  const blinkDuration = useMemo(() => {
-    if (currentAction.timeLeft > 20) return "2.0s";
-    if (currentAction.timeLeft > 10) return "1.2s";
-    if (currentAction.timeLeft > 5) return "0.8s";
-    return "0.6s";
-  }, [currentAction.timeLeft]);
-
-  const bansFromActions = useMemo(() => {
-    if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
-
-    const myTeam = session.myTeam || [];
-    const actions = session.actions || [];
-
-    const myTeamBans: number[] = [];
-    const theirTeamBans: number[] = [];
-    const cellIdToBan = new Map<number, number>();
-
-    //cell IDs from my team
-    const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
-
-    //extract bans from actions
-    for (const group of actions) {
-      if (Array.isArray(group)) {
-        for (const action of group) {
-          if (action.type === "ban" && action.championId > 0) {
-            // Track the latest ban action for each cellId (hovered or completed)
-            cellIdToBan.set(action.actorCellId, action.championId);
-
-            if (action.completed) {
-              if (myTeamCellIds.has(action.actorCellId)) {
-                myTeamBans.push(action.championId);
-              } else {
-                theirTeamBans.push(action.championId);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return { myTeamBans, theirTeamBans, cellIdToBan };
-  }, [session]);
-
   const currentAction = useMemo((): CurrentAction => {
     if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING", team: null };
 
@@ -166,6 +145,49 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       team: null
     };
   }, [session, currentTime]);
+
+  const blinkDuration = useMemo(() => {
+    if (currentAction.timeLeft > 20) return "2.0s";
+    if (currentAction.timeLeft > 10) return "1.2s";
+    if (currentAction.timeLeft > 5) return "0.8s";
+    return "0.6s";
+  }, [currentAction.timeLeft]);
+
+  const bansFromActions = useMemo(() => {
+    if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
+
+    const myTeam = session.myTeam || [];
+    const actions = session.actions || [];
+
+    const myTeamBans: number[] = [];
+    const theirTeamBans: number[] = [];
+    const cellIdToBan = new Map<number, number>();
+
+    //cell IDs from my team
+    const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
+
+    //extract bans from actions
+    for (const group of actions) {
+      if (Array.isArray(group)) {
+        for (const action of group) {
+          if (action.type === "ban" && action.championId > 0) {
+            // Track the latest ban action for each cellId (hovered or completed)
+            cellIdToBan.set(action.actorCellId, action.championId);
+
+            if (action.completed) {
+              if (myTeamCellIds.has(action.actorCellId)) {
+                myTeamBans.push(action.championId);
+              } else {
+                theirTeamBans.push(action.championId);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return { myTeamBans, theirTeamBans, cellIdToBan };
+  }, [session]);
 
   const unavailableChampionIds = useMemo(() => {
     if (!session) return new Set<number>();
@@ -239,7 +261,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       team1: "Client",
       team2: "Enemy",
       isTeam1Blue: true,
-      mode: "Normal",
+      mode: "SOLOQ",
       numGames: 1,
     };
 
@@ -544,10 +566,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       >
         <div className="flex justify-between items-start mb-4">
           <div className="flex flex-col gap-2">
-            <div className="text-base font-black uppercase tracking-tighter text-[var(--accent-blue)]">
-              Blue Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
+            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-blue)] flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-[var(--accent-blue)] text-[var(--bg-color)] rounded text-[9px]">BLUE</span>
+              Blue Side <span className="text-[var(--text-muted)] opacity-50 ml-auto text-[10px]">bans</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
                   <BanSlot
                     key={i}
@@ -628,10 +651,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
 
           <div className="flex flex-col gap-2 items-end">
-            <div className="text-base font-black uppercase tracking-tighter text-[var(--accent-red)]">
-              Red Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
+            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-red)] flex items-center gap-2">
+              <span className="text-[var(--text-muted)] opacity-50 mr-auto text-[10px]">bans</span>
+              Red Side <span className="px-2 py-0.5 bg-[var(--accent-red)] text-[var(--bg-color)] rounded text-[9px]">RED</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
                   <BanSlot
                     key={i}
@@ -659,8 +683,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
         </div>
 
-        <div className="flex flex-1 justify-between gap-6 min-h-0 w-full">
-          <div className="flex-1 flex flex-col gap-2 min-w-[180px]">
+        <div className="flex flex-1 justify-between gap-4 min-h-0 w-full">
+          <div className="pick-column flex-1 flex flex-col gap-2 min-w-[180px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
@@ -680,20 +704,23 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             })}
           </div>
 
-          <div className="flex-none flex flex-col gap-2 w-[800px] mx-auto">
-            <div className="flex flex-col items-end gap-2">
+          <div className="flex-none flex flex-col gap-1.5 w-[800px] mx-auto">
+            <div className="flex flex-col items-end">
               <div className="relative">
                 <input
                     type="text"
                     placeholder="Search..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-[180px] h-[28px] border border-[var(--border-color)] bg-[var(--surface-color)] px-4 text-[11px] focus:outline-none focus:border-[var(--brand-primary)] transition-all rounded-lg uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
+                    className="w-[180px] h-[28px] border border-[var(--border-color)] bg-[var(--surface-color)] px-3 text-[11px] focus:outline-none focus:border-[var(--brand-primary)] transition-all rounded-lg uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
                 />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
               </div>
             </div>
-            <div className="flex-[3] border border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-3 relative no-scrollbar rounded-xl shadow-inner">
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(55px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
+            <div className="flex-[2.0] border border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-3 relative no-scrollbar rounded-xl shadow-inner">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(55px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-3">
                 {filteredChampions.map((champ) => (
                     <ChampionCard
                         key={champ.id}
@@ -709,7 +736,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             <button
                 onClick={handleConfirm}
                 disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
-                className={`w-full py-2 rounded-xl font-black uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] text-sm border-2 ${
+                className={`w-full py-2.5 rounded-xl font-black uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] text-sm border-2 ${
                     stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
                         : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-40"
@@ -723,7 +750,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </button>
 
             {canShowRecommendations && (
-              <div className="mt-4 border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl p-4 relative overflow-hidden flex-1 flex flex-col min-h-0">
+              <div className="flex-[1.8] border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl overflow-hidden relative shadow-md">
                 {selectedRec ? (
                   <div className="absolute inset-0 bg-[var(--bg-color)]/95 p-2 flex animate-in fade-in duration-300 z-20">
                     <div className="w-[110px] flex flex-col items-center gap-3 shrink-0 mt-3">
@@ -764,73 +791,60 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                     </div>
                   </div>
                 ) : (
-                  <>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="font-black uppercase tracking-[0.15em] text-[10px] flex items-center gap-1.5" style={{ color: 'var(--team-accent)' }}>
-                        <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--team-accent)' }} />
-                        Strategy Recommendations
+                  <div className="w-full h-full p-2 flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2 px-1">
+                      <div className="flex items-center gap-4 overflow-hidden">
+                        <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--team-accent)] whitespace-nowrap">
+                          {suggestContext.label}
+                        </span>
+                        <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                          {UI_ROLES.map((role) => (
+                            <button
+                              key={role}
+                              onClick={() => setSelectedRole(role)}
+                              className={`px-2 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                                selectedRole === role
+                                  ? "bg-[var(--team-accent)] border-[var(--team-accent)] text-[var(--bg-color)]"
+                                  : "bg-[var(--surface-color)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)]"
+                              }`}
+                              title={role}
+                              type="button"
+                            >
+                              <RoleIcon role={role} active={selectedRole === role} />
+                              <span className="hidden xl:inline">
+                                {role === "MIDDLE"
+                                  ? "MID"
+                                  : role === "BOTTOM"
+                                  ? "ADC"
+                                  : role === "UTILITY"
+                                  ? "SUPP"
+                                  : role}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                       <button
                         onClick={() => refreshRecommendations()}
-                        className="px-3 py-1 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-md text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)] transition-all"
+                        className="px-2 py-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)] transition-all"
                       >
                         Refresh
                       </button>
                     </div>
 
-                    {activeMlSuggest && typeof activeMlSuggest.blue_winrate === "number" && typeof activeMlSuggest.red_winrate === "number" && (
-                      <div className="mb-3 flex items-center gap-4 text-[10px] font-black uppercase tracking-[0.05em] bg-[var(--bg-color)] p-2 rounded-lg border border-[var(--border-color)] w-fit">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[var(--text-muted)] opacity-50">BLUE:</span>
-                          <span className="text-[var(--accent-blue)] text-sm">{(activeMlSuggest.blue_winrate * 100).toFixed(1)}%</span>
-                        </div>
-                        <div className="w-px h-3 bg-[var(--border-color)]" />
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[var(--text-muted)] opacity-50">RED:</span>
-                          <span className="text-[var(--accent-red)] text-sm">{(activeMlSuggest.red_winrate * 100).toFixed(1)}%</span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex gap-1.5 flex-wrap mb-3">
-                      {UI_ROLES.map((role) => (
-                        <button
-                          key={role}
-                          onClick={() => setSelectedRole(role)}
-                          className={`px-3 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${
-                            selectedRole === role
-                              ? "bg-[var(--team-accent)] border-[var(--team-accent)] text-[var(--bg-color)]"
-                              : "bg-[var(--bg-color)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)]"
-                          }`}
-                          title={role}
-                          type="button"
-                        >
-                          {role === "MIDDLE"
-                            ? "MID"
-                            : role === "BOTTOM"
-                            ? "ADC"
-                            : role === "UTILITY"
-                            ? "SUPP"
-                            : role === "ALL"
-                            ? "ALL"
-                            : role}
-                        </button>
-                      ))}
-                    </div>
-
                     {mlError && (
-                      <div className="mb-2 text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest animate-pulse">
+                      <div className="text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest px-1 animate-pulse">
                         ⚠️ {mlError}
                       </div>
                     )}
 
-                    <div className="max-h-[300px] overflow-y-auto no-scrollbar pr-1">
+                    <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-1 pb-1">
                       {activeMlSuggest ? (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+                        <div className="grid grid-cols-4 lg:grid-cols-6 gap-2">
                           {visibleRecommendations.map(({ rec, champ }) => (
                             <div
                               key={`${selectedRole}-${rec.champion}`}
-                              className="flex flex-col items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2 hover:border-[var(--team-accent)] transition-all cursor-pointer hover:bg-[var(--surface-color-hover)] group"
+                              className="group flex flex-col items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2 hover:border-[var(--team-accent)] transition-all cursor-pointer hover:bg-[var(--surface-color)] hover:scale-[1.02]"
                               onClick={() => {
                                 if (!champ) return;
                                 setSelectedRec({ rec, champ });
@@ -840,19 +854,23 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                                 }
                               }}
                             >
-                              {champ ? (
-                                <div className="relative">
-                                  <img src={champ.icon} alt={champ.name} className="w-14 h-14 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--team-accent)] transition-all" />
-                                  <div className="absolute -top-1 -right-1 bg-[var(--team-accent)] text-[var(--bg-color)] text-[8px] font-black px-1 rounded border border-[var(--bg-color)]">
-                                    {(rec.score * 100).toFixed(0)}%
-                                  </div>
+                              <div className="relative">
+                                {champ ? (
+                                  <img 
+                                    src={champ.icon} 
+                                    alt={champ.name} 
+                                    className="w-14 h-14 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--team-accent)] transition-all" 
+                                  />
+                                ) : (
+                                  <div className="w-14 h-14 border-2 border-[var(--border-color)] bg-[var(--surface-color)] rounded-lg" />
+                                )}
+                                <div className="absolute -top-1 -right-1 bg-[var(--team-accent)] text-[var(--bg-color)] text-[8px] font-black px-1 rounded border border-[var(--bg-color)]">
+                                  {(rec.score * 100).toFixed(0)}%
                                 </div>
-                              ) : (
-                                <div className="w-14 h-14 border-2 border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg" />
-                              )}
+                              </div>
 
                               <div className="w-full text-center">
-                                <div className="truncate font-black uppercase tracking-tight text-[10px] text-white">
+                                <div className="truncate font-black uppercase tracking-tighter text-[9px] text-[var(--text-secondary)] group-hover:text-white">
                                   {champ ? champ.name : rec.champion}
                                 </div>
                               </div>
@@ -860,20 +878,24 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                           ))}
 
                           {visibleRecommendations.length === 0 && (
-                            <div className="col-span-full text-[var(--text-muted)] text-[10px] font-black uppercase tracking-widest text-center py-6 opacity-30">No predictions</div>
+                            <div className="col-span-full text-[var(--text-muted)] text-[9px] font-black uppercase tracking-widest text-center py-4 opacity-40">
+                              No recommendations
+                            </div>
                           )}
                         </div>
                       ) : (
-                        <div className="text-[var(--text-muted)] text-[10px] font-black uppercase tracking-widest text-center py-6 animate-pulse">Analyzing...</div>
+                        <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-[9px] font-black uppercase tracking-widest animate-pulse">
+                          Analyzing...
+                        </div>
                       )}
                     </div>
-                  </>
+                  </div>
                 )}
               </div>
             )}
           </div>
 
-          <div className="flex-1 flex flex-col gap-2 min-w-[180px]">
+          <div className="pick-column flex-1 flex flex-col gap-2 min-w-[180px]">
             {theirTeam.map((player: any, i: number) => {
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
