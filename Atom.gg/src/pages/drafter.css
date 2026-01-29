@@ -11,3 +11,252 @@
     scrollbar-width: none;
   }
 }
+
+@keyframes smooth-pulse-blue {
+  0%, 100% {
+    border-color: rgba(0, 209, 255, 0.4);
+    box-shadow: 0 0 5px rgba(0, 209, 255, 0.1);
+  }
+  50% {
+    border-color: rgba(0, 209, 255, 1);
+    box-shadow: 0 0 15px rgba(0, 209, 255, 0.4);
+  }
+}
+
+@keyframes smooth-pulse-red {
+  0%, 100% {
+    border-color: rgba(255, 75, 80, 0.4);
+    box-shadow: 0 0 5px rgba(255, 75, 80, 0.1);
+  }
+  50% {
+    border-color: rgba(255, 75, 80, 1);
+    box-shadow: 0 0 15px rgba(255, 75, 80, 0.4);
+  }
+}
+
+@keyframes smooth-pulse-green {
+  0%, 100% {
+    border-color: rgba(0, 255, 148, 0.4);
+    box-shadow: 0 0 5px rgba(0, 255, 148, 0.1);
+  }
+  50% {
+    border-color: rgba(0, 255, 148, 1);
+    box-shadow: 0 0 15px rgba(0, 255, 148, 0.4);
+  }
+}
+
+@keyframes blink-red {
+  0%, 100% {
+    border-color: rgba(255, 75, 80, 0.4);
+    box-shadow: 0 0 5px rgba(255, 75, 80, 0.1);
+  }
+  50% {
+    border-color: rgba(255, 75, 80, 1);
+    box-shadow: 0 0 15px rgba(255, 75, 80, 0.4);
+  }
+}
+
+@keyframes blink-blue {
+  0%, 100% {
+    border-color: rgba(0, 209, 255, 0.4);
+    box-shadow: 0 0 5px rgba(0, 209, 255, 0.1);
+  }
+  50% {
+    border-color: rgba(0, 209, 255, 1);
+    box-shadow: 0 0 15px rgba(0, 209, 255, 0.4);
+  }
+}
+
+@keyframes intense-pulse-blue {
+  0%, 100% {
+    border-color: rgba(0, 209, 255, 0.6);
+    box-shadow: 0 0 10px rgba(0, 209, 255, 0.2);
+  }
+  50% {
+    border-color: rgba(0, 209, 255, 1);
+    box-shadow: 0 0 25px rgba(0, 209, 255, 0.6);
+  }
+}
+
+@keyframes intense-pulse-red {
+  0%, 100% {
+    border-color: rgba(255, 75, 80, 0.6);
+    box-shadow: 0 0 10px rgba(255, 75, 80, 0.2);
+  }
+  50% {
+    border-color: rgba(255, 75, 80, 1);
+    box-shadow: 0 0 25px rgba(255, 75, 80, 0.6);
+  }
+}
+
+.animate-intense-pulse-blue {
+  animation: intense-pulse-blue 0.6s ease-in-out infinite;
+}
+
+.animate-intense-pulse-red {
+  animation: intense-pulse-red 0.6s ease-in-out infinite;
+}
+
+.animate-blink-red {
+  animation: blink-red 1.2s ease-in-out infinite;
+}
+
+.animate-blink-blue {
+  animation: blink-blue 1.2s ease-in-out infinite;
+}
+
+.animate-smooth-pulse-blue {
+  animation: smooth-pulse-blue 1.2s ease-in-out infinite;
+}
+
+.animate-smooth-pulse-red {
+  animation: smooth-pulse-red 1.2s ease-in-out infinite;
+}
+
+.animate-smooth-pulse-green {
+  animation: smooth-pulse-green 1.2s ease-in-out infinite;
+}
+
+@keyframes slide-in-bottom {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-in {
+  animation-duration: 0.5s;
+  animation-fill-mode: both;
+}
+
+.duration-500 {
+  animation-duration: 0.5s;
+}
+
+.duration-300 {
+  animation-duration: 0.3s;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: slide-in-bottom;
+}
+
+/* Responsive scaling for larger screens */
+@media (min-height: 900px) {
+  /* Scale up team names */
+  .team-name {
+    font-size: 1.25rem !important;
+  }
+
+  /* Scale up bans with more spacing */
+  .ban-slot-container {
+    gap: 0.625rem !important;
+  }
+
+  .ban-slot {
+    width: 3.5rem !important;
+    height: 3.5rem !important;
+  }
+
+  /* Scale up pick slots with more vertical spacing */
+  .pick-column {
+    gap: 1rem !important;
+  }
+
+  .pick-slot {
+    height: 6.25rem !important;
+    padding: 0.75rem !important;
+  }
+
+  .pick-slot-image {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .pick-slot-player {
+    font-size: 0.7rem !important;
+  }
+
+  /* Scale up scoreboard */
+  .scoreboard {
+    padding: 0.625rem !important;
+  }
+
+  .scoreboard-label {
+    font-size: 0.7rem !important;
+  }
+
+  .scoreboard-value {
+    font-size: 1.5rem !important;
+  }
+
+  /* Increase recommendation text size */
+  .recommendation-text {
+    font-size: 0.9375rem !important;
+    line-height: 1.6 !important;
+  }
+}
+
+@media (min-height: 1080px) {
+  /* Further scale up for very large screens */
+  .team-name {
+    font-size: 1.5rem !important;
+  }
+
+  .ban-slot-container {
+    gap: 0.75rem !important;
+  }
+
+  .ban-slot {
+    width: 4rem !important;
+    height: 4rem !important;
+  }
+
+  .pick-column {
+    gap: 1.5rem !important;
+  }
+
+  .pick-slot {
+    height: 7.25rem !important;
+    padding: 1rem !important;
+  }
+
+  .pick-slot-image {
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .pick-slot-player {
+    font-size: 0.8rem !important;
+  }
+
+  .scoreboard {
+    padding: 0.75rem !important;
+  }
+
+  .scoreboard-label {
+    font-size: 0.75rem !important;
+  }
+
+  .scoreboard-value {
+    font-size: 1.75rem !important;
+  }
+
+  .recommendation-text {
+    font-size: 1rem !important;
+    line-height: 1.65 !important;
+  }
+}

@@ -2,8 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg-color: #050708;
+  --surface-color: #0D1113;
+  --surface-color-hover: #161B1E;
+  --border-color: #1F292E;
+  --accent-blue: #00D1FF;
+  --accent-red: #FF4B50;
+  --brand-primary: #00FF94;
+  --brand-soft: #00E676;
+  --brand-dark: #004D40;
+  --text-primary: #E2E8F0;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+}
+
+@layer utilities {
+  .animate-in {
+    animation-duration: 0.6s;
+    animation-fill-mode: both;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .fade-in { animation-name: fade-in; }
+  .zoom-in-95 { animation-name: zoom-in-95; }
+  .slide-in-from-top-4 { animation-name: slide-in-from-top; }
+  .slide-in-from-bottom-4 { animation-name: slide-in-from-bottom; }
+
+  .duration-700 { animation-duration: 700ms; }
+  .duration-1000 { animation-duration: 1000ms; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoom-in-95 {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slide-in-from-top {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-from-bottom {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
   padding: 0;
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }

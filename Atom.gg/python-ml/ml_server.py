@@ -65,6 +65,7 @@ class MlServer:
                     self.app.set_roster_auto("RED", str(red_team))
 
                 self.initialized = True
+                wr = self.app.predict_live_winrate()
                 return {
                     "request_id": request_id,
                     "ok": True,
@@ -73,6 +74,8 @@ class MlServer:
                         "mode": self.app.series_config["mode"],
                         "game": self.app.series_config["current_game"],
                         "total_games": self.app.series_config["total_games"],
+                        "blue_winrate": wr["blue"],
+                        "red_winrate": wr["red"],
                         "teams": {
                             "BLUE": self.app.teams["BLUE"],
                             "RED": self.app.teams["RED"],
@@ -116,16 +119,29 @@ class MlServer:
             if msg_type == "ban":
                 champ = str(msg.get("champion", ""))
                 self.app.add_ban(champ)
-                return {"request_id": request_id, "ok": True, "type": "ban_result", "payload": {"champion": champ}}
+                wr = self.app.predict_live_winrate()
+                return {
+                    "request_id": request_id,
+                    "ok": True,
+                    "type": "ban_result",
+                    "payload": {"champion": champ, "blue_winrate": wr["blue"], "red_winrate": wr["red"]},
+                }
 
             if msg_type == "pick":
                 side = str(msg.get("side", "")).upper()
                 champ = str(msg.get("champion", ""))
                 self.app.add_pick(side, champ)
-                return {"request_id": request_id, "ok": True, "type": "pick_result", "payload": {"side": side, "champion": champ}}
+                wr = self.app.predict_live_winrate()
+                return {
+                    "request_id": request_id,
+                    "ok": True,
+                    "type": "pick_result",
+                    "payload": {"side": side, "champion": champ, "blue_winrate": wr["blue"], "red_winrate": wr["red"]},
+                }
 
             if msg_type == "next_game":
                 self.app.end_game()
+                wr = self.app.predict_live_winrate()
                 return {
                     "request_id": request_id,
                     "ok": True,
@@ -133,6 +149,8 @@ class MlServer:
                     "payload": {
                         "game": self.app.series_config["current_game"],
                         "total_games": self.app.series_config["total_games"],
+                        "blue_winrate": wr["blue"],
+                        "red_winrate": wr["red"],
                     },
                 }
 

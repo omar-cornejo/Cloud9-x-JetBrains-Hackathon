@@ -5,9 +5,12 @@ interface ChampionCardProps {
   isSelected: boolean;
   isStaged?: boolean;
   onSelect: (champion: Champion) => void;
+  highlightColor?: string;
 }
 
-export function ChampionCard({ champion, isSelected, isStaged, onSelect }: ChampionCardProps) {
+export function ChampionCard({ champion, isSelected, isStaged, onSelect, highlightColor }: ChampionCardProps) {
+  const activeColor = highlightColor || "var(--brand-primary)";
+
   return (
     <div
       className={`flex flex-col items-center gap-1 group cursor-pointer ${
@@ -15,18 +18,24 @@ export function ChampionCard({ champion, isSelected, isStaged, onSelect }: Champ
       }`}
       onClick={() => onSelect(champion)}
     >
-      <img
-        src={champion.icon}
-        alt={champion.name}
-        className={`w-[60px] h-[60px] border-2 transition-all duration-200 ${
-          isStaged 
-            ? "border-[#3498db] scale-110 shadow-[0_0_15px_rgba(52,152,219,0.5)]" 
-            : "border-[#333] group-hover:border-[#3498db]"
+      <div className="relative">
+        <img
+          src={champion.icon}
+          alt={champion.name}
+          className={`w-[45px] h-[45px] lg:w-[50px] lg:h-[50px] border-2 transition-all duration-300 rounded-sm ${
+            isStaged 
+              ? "scale-105 z-10" 
+              : "border-[var(--border-color)] group-hover:border-[var(--text-secondary)]"
+          }`}
+          style={isStaged ? { borderColor: activeColor } : {}}
+        />
+      </div>
+      <span 
+        className={`text-[11px] text-center truncate w-full transition-colors tracking-tight ${
+          isStaged ? "font-black" : "text-[var(--text-secondary)] group-hover:text-white font-bold"
         }`}
-      />
-      <span className={`text-[10px] text-center truncate w-full transition-colors ${
-        isStaged ? "text-[#3498db] font-bold" : "text-[#ccc] group-hover:text-white"
-      }`}>
+        style={isStaged ? { color: activeColor } : {}}
+      >
         {champion.name}
       </span>
     </div>

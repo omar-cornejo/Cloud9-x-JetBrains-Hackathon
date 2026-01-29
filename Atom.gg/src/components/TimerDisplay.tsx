@@ -19,38 +19,39 @@ export function TimerDisplay({
   const isComplete = currentTurn >= draftSequence.length;
 
   return (
-    <div className="flex flex-col items-center justify-center px-14 py-5 bg-[#1a1a1a] border-2 border-[#333] shadow-lg mt-2">
+    <div className="flex flex-col items-center justify-center px-8 py-3 lg:px-12 lg:py-4 bg-[var(--surface-color)] border-2 border-[var(--border-color)] mt-1 rounded-xl relative overflow-hidden">
       <div
-        className={`text-4xl font-black leading-none ${
-          timeLeft <= 10 ? "text-red-500 animate-pulse" : "text-[#3498db]"
+        className={`text-3xl lg:text-4xl font-black leading-none tracking-tighter transition-all duration-300 ${
+          timeLeft <= 10 ? "text-[var(--brand-primary)] animate-pulse" : "text-[var(--brand-primary)]"
         }`}
       >
         {timeLeft}
       </div>
-      <div className="text-[17px] uppercase tracking-[4px] text-[#666] font-bold mt-1">
+      <div className="text-[11px] lg:text-[12px] uppercase tracking-[0.2em] text-[var(--text-muted)] font-black mt-1">
         {!isComplete ? (
-          <span>
+          <div className="flex items-center gap-2">
             <span
               className={
                 activeTurn.team === "blue"
-                  ? "text-[#3498db]"
-                  : "text-[#e74c3c]"
+                  ? "text-[var(--accent-blue)]"
+                  : "text-[var(--accent-red)]"
               }
             >
               {activeTurn.team === "blue" ? blueTeamName : redTeamName}
-            </span>{" "}
+            </span>
+            <span className="opacity-40">•</span>
             <span
               className={
-                activeTurn.type === "pick"
-                  ? "text-[#3498db]"
-                  : "text-[#e74c3c]"
+                activeTurn.team === "blue"
+                  ? "text-[var(--accent-blue)]"
+                  : "text-[var(--accent-red)]"
               }
             >
-              {activeTurn.type}
+              {activeTurn.type.toUpperCase()}
             </span>
-          </span>
+          </div>
         ) : (
-          "Complete"
+          <span className="text-[var(--brand-primary)] animate-pulse">DRAFT COMPLETE</span>
         )}
       </div>
     </div>

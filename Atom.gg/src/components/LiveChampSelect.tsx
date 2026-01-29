@@ -7,9 +7,31 @@ import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
 import { NoActiveDraft } from "./NoActiveDraft";
+import "../pages/drafter.css";
 
 const ALL_ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 const UI_ROLES: MlRole[] = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+
+function roleIconUrl(role: MlRole): string {
+  const lane =
+    role === "TOP" ? "top" :
+    role === "JUNGLE" ? "jungle" :
+    role === "MIDDLE" ? "middle" :
+    role === "BOTTOM" ? "bottom" :
+    role === "UTILITY" ? "utility" :
+    "fill";
+  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-${lane}.png`;
+}
+
+function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
+  return (
+    <img
+      src={roleIconUrl(role)}
+      alt={role}
+      className={`w-4 h-4 rounded ${active ? "opacity-100" : "opacity-70"}`}
+    />
+  );
+}
 
 interface LiveChampSelectProps {
   onBack: () => void;
@@ -21,6 +43,7 @@ interface CurrentAction {
   isMyTurn: boolean;
   timeLeft: number;
   phase: string;
+  team: "blue" | "red" | null;
 }
 
 export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
@@ -66,6 +89,70 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     [championById, championByName]
   );
 
+  const currentAction = useMemo((): CurrentAction => {
+    if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING", team: null };
+
+    const localCellId = session.localPlayerCellId;
+    const actions = session.actions || [];
+    const timer = session.timer || {};
+    const myTeam = session.myTeam || [];
+    const myTeamCellIds = new Set(myTeam.map((p: any) => p.cellId));
+
+    let activeAction = null;
+    let isMyTurn = false;
+
+    for (const group of actions) {
+      if (!Array.isArray(group)) continue;
+      for (const action of group) {
+        if (action.isInProgress && !action.completed) {
+          activeAction = action;
+          if (action.actorCellId === localCellId) {
+            isMyTurn = true;
+          }
+          break;
+        }
+      }
+      if (activeAction) break;
+    }
+
+    //time left
+    let timeLeft = 0;
+    if (timer.adjustedTimeLeftInPhase !== undefined && timer.internalNowInEpochMs !== undefined) {
+      const elapsedSinceSnapshot = currentTime - timer.internalNowInEpochMs;
+      const remainingMs = timer.adjustedTimeLeftInPhase - elapsedSinceSnapshot;
+      timeLeft = Math.max(0, Math.ceil(remainingMs / 1000)) - 1;
+      if (timeLeft < 0) timeLeft = 0;
+    }
+
+    const phase = timer.phase || "WAITING";
+    const isPlanning = phase === "PLANNING" || phase === "FINALIZATION";
+
+    if (activeAction) {
+      return {
+        type: isPlanning ? null : activeAction.type,
+        isMyTurn,
+        timeLeft,
+        phase,
+        team: myTeamCellIds.has(activeAction.actorCellId) ? "blue" : "red"
+      };
+    }
+
+    return {
+      type: null,
+      isMyTurn: false,
+      timeLeft,
+      phase,
+      team: null
+    };
+  }, [session, currentTime]);
+
+  const blinkDuration = useMemo(() => {
+    if (currentAction.timeLeft > 20) return "2.0s";
+    if (currentAction.timeLeft > 10) return "1.2s";
+    if (currentAction.timeLeft > 5) return "0.8s";
+    return "0.6s";
+  }, [currentAction.timeLeft]);
+
   const bansFromActions = useMemo(() => {
     if (!session) return { myTeamBans: [], theirTeamBans: [], cellIdToBan: new Map<number, number>() };
 
@@ -101,70 +188,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
     return { myTeamBans, theirTeamBans, cellIdToBan };
   }, [session]);
-
-  const currentAction = useMemo((): CurrentAction => {
-    if (!session) return { type: null, isMyTurn: false, timeLeft: 0, phase: "WAITING" };
-
-    const localCellId = session.localPlayerCellId;
-    const actions = session.actions || [];
-    const timer = session.timer || {};
-
-    let myCurrentAction = null;
-    for (const group of actions) {
-      if (!Array.isArray(group)) continue;
-      for (const action of group) {
-        if (action.actorCellId === localCellId && action.isInProgress && !action.completed) {
-          myCurrentAction = action;
-          break;
-        }
-      }
-      if (myCurrentAction) break;
-    }
-
-    //time left - account for time elapsed since session was fetched
-    let timeLeft = 0;
-    if (timer.adjustedTimeLeftInPhase !== undefined && timer.internalNowInEpochMs !== undefined) {
-      const elapsedSinceSnapshot = currentTime - timer.internalNowInEpochMs;
-      const remainingMs = timer.adjustedTimeLeftInPhase - elapsedSinceSnapshot;
-      timeLeft = Math.max(0, Math.ceil(remainingMs / 1000)) - 1;
-      if (timeLeft < 0) timeLeft = 0;
-    }
-
-    const phase = timer.phase || "WAITING";
-    const isPlanning = phase === "PLANNING" || phase === "FINALIZATION";
-
-    if (myCurrentAction) {
-      return {
-        type: myCurrentAction.type,
-        isMyTurn: true,
-        timeLeft,
-        phase
-      };
-    }
-
-    //check if any action is in progress (not our turn)
-    let someoneElseTurn = false;
-    let actionType: "ban" | "pick" | null = null;
-
-    for (const group of actions) {
-      if (!Array.isArray(group)) continue;
-      for (const action of group) {
-        if (action.isInProgress && !action.completed) {
-          someoneElseTurn = true;
-          actionType = action.type;
-          break;
-        }
-      }
-      if (someoneElseTurn) break;
-    }
-
-    return {
-      type: isPlanning ? null : actionType,
-      isMyTurn: false,
-      timeLeft,
-      phase
-    };
-  }, [session, currentTime]);
 
   const unavailableChampionIds = useMemo(() => {
     if (!session) return new Set<number>();
@@ -210,6 +233,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return names;
   }, [session, bansFromActions, championsMap]);
 
+  const teamHighlightColor = currentAction.team === "blue" ? "var(--accent-blue)" : currentAction.team === "red" ? "var(--accent-red)" : "var(--brand-primary)";
+  const teamHighlightShadow = currentAction.team === "blue" ? "rgba(0, 209, 255, 0.25)" : currentAction.team === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
+
   const filteredChampions = useMemo(() => {
     const filtered = [...champions]
       .filter((champ) =>
@@ -235,7 +261,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       team1: "Client",
       team2: "Enemy",
       isTeam1Blue: true,
-      mode: "Normal",
+      mode: "SOLOQ",
       numGames: 1,
     };
 
@@ -412,6 +438,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return null;
   }, [currentAction.type, mlBanSuggest, mlMyPickSuggest]);
 
+  const [selectedRec, setSelectedRec] = useState<{ rec: MlRecommendation; champ: Champion | undefined } | null>(null);
+
   const visibleRecommendations = useMemo(() => {
     if (!activeMlSuggest) return [];
     const recommendationsMap = (activeMlSuggest.recommendations ?? {}) as Record<string, MlRecommendation[]>;
@@ -431,7 +459,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       recs = recommendationsMap[selectedRole] ?? [];
     }
 
-    return recs
+    const filtered = recs
       .map((rec) => ({ rec, champ: resolveChampion(rec.champion) }))
       .filter(({ champ }) => {
         if (!champ) return true;
@@ -439,7 +467,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         if (lockedChampionNames.has(champ.name)) return false;
         return !unavailableChampionIds.has(champ.numeric_id);
       });
-  }, [activeMlSuggest, lockedChampionNames, resolveChampion, selectedRole, unavailableChampionIds]);
+
+    return filtered;
+  }, [activeMlSuggest, lockedChampionNames, resolveChampion, selectedRole, unavailableChampionIds, selectedRec]);
+
+  const isLowTime = currentAction.timeLeft <= 10;
 
   const handleSelectChampion = async (champion: Champion) => {
     if (champion.name !== "none" && unavailableChampionIds.has(champion.numeric_id)) {
@@ -488,13 +520,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
 
     if (!currentAction.isMyTurn) {
-      if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Enemy Banning</span>;
-      if (currentAction.type === "pick") return <span className="text-[#3498db]">Enemy Picking</span>;
+      if (currentAction.type === "ban") return <span className="text-[var(--accent-red)]">Enemy Banning</span>;
+      if (currentAction.type === "pick") return <span className="text-[var(--accent-blue)]">Enemy Picking</span>;
       return "Waiting...";
     }
 
-    if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Ban a Champion</span>;
-    if (currentAction.type === "pick") return <span className="text-[#3498db]">Pick a Champion</span>;
+    if (currentAction.type === "ban") return <span className="text-[var(--accent-red)]">Ban a Champion</span>;
+    if (currentAction.type === "pick") return <span className="text-[var(--accent-blue)]">Pick a Champion</span>;
     return "Waiting...";
   };
 
@@ -505,24 +537,16 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   };
 
   const getConfirmButtonColor = () => {
-    //if no champion or "none" is selected
-    if (!stagedChampion || stagedChampion.name === "none") {
-      return "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]";
-    }
-
-    if (currentAction.type === "ban") {
-      return "bg-[#c0392b] hover:bg-[#a93226] shadow-[0_0_20px_rgba(192,57,43,0.3)]";
-    }
-    return "bg-[#27ae60] hover:bg-[#229954] shadow-[0_0_20px_rgba(39,174,96,0.3)]";
+    return "text-[var(--bg-color)] brightness-110";
   };
 
   // Keep these returns AFTER all hooks to preserve hook order.
   if (!session && !error) {
     return (
-      <div className="flex items-center justify-center h-full w-full bg-[#121212] text-white">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin" />
-          <p className="text-xl font-bold uppercase tracking-widest text-[#3498db]">Loading Session...</p>
+      <div className="flex items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)]">
+        <div className="flex flex-col items-center gap-6">
+          <div className="w-16 h-16 border-4 border-[var(--brand-primary)] border-t-transparent rounded-full animate-spin" />
+          <p className="text-2xl font-black uppercase tracking-[0.2em] text-[var(--brand-primary)] animate-pulse">Syncing with LCU...</p>
         </div>
       </div>
     );
@@ -533,54 +557,92 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }
 
   return (
-      <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
-        <div className="flex justify-between items-start mb-8">
+      <div 
+        className="flex flex-col h-full w-full p-4 bg-[var(--bg-color)] text-[var(--text-primary)] font-sans box-border relative overflow-hidden"
+        style={{
+          '--team-accent': teamHighlightColor,
+          '--team-accent-shadow': teamHighlightShadow
+        } as React.CSSProperties}
+      >
+        <div className="flex justify-between items-start mb-4">
           <div className="flex flex-col gap-2">
-            <div className="text-lg font-bold uppercase tracking-widest text-[#3498db]">
-              Blue Side <span className="text-[#e74c3c]">bans</span>
+            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-blue)] flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-[var(--accent-blue)] text-[var(--bg-color)] rounded text-[9px]">BLUE</span>
+              Blue Side <span className="text-[var(--text-muted)] opacity-50 ml-auto text-[10px]">bans</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
-                  <BanSlot key={i} ban={getChamp(id)} />
+                  <BanSlot
+                    key={i}
+                    ban={getChamp(id)}
+                    team="blue"
+                    isActive={currentAction.type === "ban" && currentAction.team === "blue" && i === bansFromActions.myTeamBans.length}
+                    isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "blue"}
+                    animationDuration={blinkDuration}
+                  />
               ))}
-              {Array.from({ length: 5 - bansFromActions.myTeamBans.length }).map((_, i) => (
-                  <BanSlot key={`empty-my-${i}`} ban={null} />
-              ))}
+              {Array.from({ length: 5 - bansFromActions.myTeamBans.length }).map((_, i) => {
+                  const absoluteIndex = bansFromActions.myTeamBans.length + i;
+                  return (
+                    <BanSlot
+                      key={`empty-my-${i}`}
+                      ban={null}
+                      team="blue"
+                      isActive={currentAction.type === "ban" && currentAction.team === "blue" && absoluteIndex === bansFromActions.myTeamBans.length}
+                      isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "blue"}
+                      animationDuration={blinkDuration}
+                    />
+                  );
+              })}
             </div>
             <button
                 onClick={onBack}
-                className="mt-2 flex items-center justify-center gap-2 px-3 py-1.5 bg-[#1a1a1a] border border-[#333] rounded-lg text-[10px] font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group w-fit"
+                className="mt-2 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all group w-fit"
             >
-              Back
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-3 w-3 transform group-hover:-translate-x-1 transition-transform"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+              Exit
             </button>
           </div>
 
-          <div className="flex flex-col items-center gap-3">
-            <div className="text-3xl font-black text-[#3498db]">LIVE SESSION</div>
-            <div className="text-xs text-[#666] uppercase tracking-widest font-bold">
-              {session.isCustomGame ? "Custom Game" : "Ranked Game"}
+          <div className="flex flex-col items-center gap-2">
+            <div className="text-2xl font-black text-white tracking-tighter uppercase">Live <span className="text-[var(--brand-primary)]">Integration</span></div>
+            <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.3em] font-black bg-[var(--surface-color)] px-3 py-0.5 rounded-full border border-[var(--border-color)]">
+              {session.isCustomGame ? "Tournament" : "Matchmaking"}
             </div>
 
             {/* Timer and Phase Display */}
-            <div className="flex flex-col items-center gap-2 bg-[#1a1a1a] border-2 border-[#333] rounded-xl px-8 py-4 min-w-[280px]">
-              <div className={`text-sm font-bold uppercase tracking-widest ${
-                  currentAction.isMyTurn ? "text-[#3498db]" : "text-[#666]"
+            <div className="flex flex-col items-center gap-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl px-8 py-3 min-w-[240px] relative overflow-hidden">
+              <div className={`text-[11px] font-black uppercase tracking-[0.15em] ${
+                  currentAction.isMyTurn ? "text-[var(--brand-primary)]" : "text-[var(--text-muted)]"
               }`}>
                 {getPhaseText()}
               </div>
-              <div className={`text-5xl font-black tabular-nums ${
+              <div className={`text-5xl font-black tabular-nums tracking-tighter transition-all duration-300 ${
                   currentAction.timeLeft <= 10
-                      ? "text-[#e74c3c] animate-pulse"
+                      ? "text-[var(--brand-primary)] animate-pulse"
                       : currentAction.isMyTurn
                           ? "text-white"
-                          : "text-[#444]"
+                          : "text-[var(--text-muted)] opacity-30"
               }`}>
                 {currentAction.timeLeft}
               </div>
               {currentAction.isMyTurn && (
-                  <div className="h-1 w-full bg-[#333] rounded-full overflow-hidden mt-2">
+                  <div className="h-1 w-full bg-[var(--bg-color)] rounded-full overflow-hidden mt-2 border border-[var(--border-color)]">
                     <div
-                        className="h-full bg-[#3498db] rounded-full transition-all duration-1000 ease-linear"
+                        className="h-full bg-[var(--brand-primary)] rounded-full transition-all duration-1000 ease-linear"
                         style={{ width: `${(currentAction.timeLeft / 30) * 100}%` }}
                     />
                   </div>
@@ -588,23 +650,41 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="text-lg font-bold uppercase tracking-widest text-right text-[#e74c3c]">
-              Red Side <span className="text-[#e74c3c]">bans</span>
+          <div className="flex flex-col gap-2 items-end">
+            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-red)] flex items-center gap-2">
+              <span className="text-[var(--text-muted)] opacity-50 mr-auto text-[10px]">bans</span>
+              Red Side <span className="px-2 py-0.5 bg-[var(--accent-red)] text-[var(--bg-color)] rounded text-[9px]">RED</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
-                  <BanSlot key={i} ban={getChamp(id)} />
+                  <BanSlot
+                    key={i}
+                    ban={getChamp(id)}
+                    team="red"
+                    isActive={currentAction.type === "ban" && currentAction.team === "red" && i === bansFromActions.theirTeamBans.length}
+                    isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "red"}
+                    animationDuration={blinkDuration}
+                  />
               ))}
-              {Array.from({ length: 5 - bansFromActions.theirTeamBans.length }).map((_, i) => (
-                  <BanSlot key={`empty-their-${i}`} ban={null} />
-              ))}
+              {Array.from({ length: 5 - bansFromActions.theirTeamBans.length }).map((_, i) => {
+                  const absoluteIndex = bansFromActions.theirTeamBans.length + i;
+                  return (
+                    <BanSlot
+                      key={`empty-their-${i}`}
+                      ban={null}
+                      team="red"
+                      isActive={currentAction.type === "ban" && currentAction.team === "red" && absoluteIndex === bansFromActions.theirTeamBans.length}
+                      isLowTime={isLowTime && currentAction.type === "ban" && currentAction.team === "red"}
+                      animationDuration={blinkDuration}
+                    />
+                  );
+              })}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-1 justify-between gap-8 min-h-0">
-          <div className="flex flex-col gap-5 w-[220px]">
+        <div className="flex flex-1 justify-between gap-4 min-h-0 w-full">
+          <div className="pick-column flex-1 flex flex-col gap-2 min-w-[180px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
@@ -616,23 +696,31 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                       index={i}
                       team="blue"
                       playerName={isCurrentPlayer ? "YOU" : (player.gameName || `Player ${i + 1}`)}
+                      isActive={currentAction.type === "pick" && currentAction.team === "blue" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      isLowTime={isLowTime && currentAction.type === "pick" && currentAction.team === "blue" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      animationDuration={blinkDuration}
                   />
               );
             })}
           </div>
 
-          <div className="flex-1 flex flex-col gap-5 min-w-0">
-            <div className="flex flex-col items-end gap-3">
-              <input
-                  type="text"
-                  placeholder="Search champion..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className={`w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest`}
-              />
+          <div className="flex-none flex flex-col gap-1.5 w-[800px] mx-auto">
+            <div className="flex flex-col items-end">
+              <div className="relative">
+                <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-[180px] h-[28px] border border-[var(--border-color)] bg-[var(--surface-color)] px-3 text-[11px] focus:outline-none focus:border-[var(--brand-primary)] transition-all rounded-lg uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
+                />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
             </div>
-            <div className={`flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner `}>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
+            <div className="flex-[2.0] border border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-3 relative no-scrollbar rounded-xl shadow-inner">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(55px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-3">
                 {filteredChampions.map((champ) => (
                     <ChampionCard
                         key={champ.id}
@@ -640,6 +728,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                         isSelected={champ.name !== "none" && unavailableChampionIds.has(champ.numeric_id)}
                         isStaged={stagedChampion?.id === champ.id}
                         onSelect={(c) => handleSelectChampion(c)}
+                        highlightColor={teamHighlightColor}
                     />
                 ))}
               </div>
@@ -647,115 +736,166 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             <button
                 onClick={handleConfirm}
                 disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
-                className={`w-full py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
+                className={`w-full py-2.5 rounded-xl font-black uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] text-sm border-2 ${
                     stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
-                        : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
+                        : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-40"
                 }`}
+                style={stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn ? {
+                  backgroundColor: teamHighlightColor,
+                  borderColor: teamHighlightColor
+                } : {}}
             >
-              {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Phase" : getConfirmButtonText()}
+              {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Game" : getConfirmButtonText()}
             </button>
 
             {canShowRecommendations && (
-              <div className="mt-4 border-2 border-[#333] bg-[#1a1a1a] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs">
-                    {suggestContext.label} ({suggestContext.mySide}{suggestContext.isBanMode ? ` vs ${suggestContext.analyzeSide}` : ""})
-                  </div>
-                  <button
-                    onClick={() => refreshRecommendations()}
-                    className="px-3 py-1 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
-                  >
-                    Refresh
-                  </button>
-                </div>
-
-                {activeMlSuggest && (
-                  <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[#444]">
-                    ML: {activeMlSuggest.target_side} {activeMlSuggest.is_ban_mode ? "BAN" : "PICK"}
-                  </div>
-                )}
-
-                <div className="mt-3 flex gap-2 flex-wrap">
-                  {UI_ROLES.map((role) => (
-                    <button
-                      key={role}
-                      onClick={() => setSelectedRole(role)}
-                      className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
-                        selectedRole === role
-                          ? "bg-[#3498db] border-[#3498db] text-white"
-                          : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
-                      }`}
-                      title={role}
-                      type="button"
-                    >
-                      {role === "MIDDLE"
-                        ? "MID"
-                        : role === "BOTTOM"
-                        ? "ADC"
-                        : role === "UTILITY"
-                        ? "SUPPORT"
-                        : role === "ALL"
-                        ? "TODOS"
-                        : role}
-                    </button>
-                  ))}
-                </div>
-
-                {mlError && (
-                  <div className="mt-2 text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
-                    {mlError}
-                  </div>
-                )}
-
-                <div className="mt-3 max-h-[300px] overflow-y-auto no-scrollbar pr-1">
-                  {activeMlSuggest ? (
-                    <div className="flex flex-col gap-2">
-                      {visibleRecommendations.map(({ rec, champ }) => (
-                        <div
-                          key={`${selectedRole}-${rec.champion}`}
-                          className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
-                          onClick={() => {
-                            if (!champ) return;
-                            setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
-                            if (stagedChampion?.name !== champ.name) {
-                              handleSelectChampion(champ);
-                            }
-                          }}
+              <div className="flex-[1.8] border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl overflow-hidden relative shadow-md">
+                {selectedRec ? (
+                  <div className="absolute inset-0 bg-[var(--bg-color)]/95 p-2 flex animate-in fade-in duration-300 z-20">
+                    <div className="w-[110px] flex flex-col items-center gap-3 shrink-0 mt-3">
+                      {selectedRec.champ ? (
+                        <img
+                          src={selectedRec.champ.icon}
+                          alt={selectedRec.champ.name}
+                          className="w-16 h-16 border-2 rounded-xl"
+                          style={{ borderColor: teamHighlightColor }}
+                        />
+                      ) : (
+                        <div 
+                          className="w-16 h-16 border-2 bg-[var(--surface-color)] rounded-xl"
+                          style={{ borderColor: teamHighlightColor }}
+                        />
+                      )}
+                      <div className="flex flex-col gap-1 items-center text-center w-full">
+                        <div className="text-sm font-black uppercase tracking-tight text-white truncate w-full">
+                          {selectedRec.champ ? selectedRec.champ.name : selectedRec.rec.champion}
+                        </div>
+                        <div 
+                          className="text-xs font-black uppercase tracking-wider"
+                          style={{ color: teamHighlightColor }}
                         >
-                          {champ ? (
-                            <img src={champ.icon} alt={champ.name} className="w-10 h-10 border border-[#333]" />
-                          ) : (
-                            <div className="w-10 h-10 border border-[#333] bg-[#222]" />
-                          )}
+                          {(selectedRec.rec.score * 100).toFixed(0)}%
+                        </div>
+                        <button 
+                          onClick={() => setSelectedRec(null)}
+                          className="mt-2 px-4 py-1 bg-[var(--surface-color)] border-2 border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-white hover:bg-[var(--surface-color-hover)] hover:border-[var(--team-accent)] transition-all"
+                        >
+                          Back
+                        </button>
+                      </div>
+                    </div>
 
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="truncate font-black uppercase tracking-wide text-sm">
-                                {champ ? champ.name : rec.champion}
+                    <div className="flex-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl p-3 text-[13px] leading-relaxed text-[var(--text-secondary)] italic overflow-y-auto no-scrollbar whitespace-pre-line shadow-inner">
+                      {selectedRec.rec.tactical || "No detailed analysis available."}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full p-2 flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2 px-1">
+                      <div className="flex items-center gap-4 overflow-hidden">
+                        <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--team-accent)] whitespace-nowrap">
+                          {suggestContext.label}
+                        </span>
+                        <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                          {UI_ROLES.map((role) => (
+                            <button
+                              key={role}
+                              onClick={() => setSelectedRole(role)}
+                              className={`px-2 py-1.5 rounded-lg border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                                selectedRole === role
+                                  ? "bg-[var(--team-accent)] border-[var(--team-accent)] text-[var(--bg-color)]"
+                                  : "bg-[var(--surface-color)] border border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)]"
+                              }`}
+                              title={role}
+                              type="button"
+                            >
+                              <RoleIcon role={role} active={selectedRole === role} />
+                              <span className="hidden xl:inline">
+                                {role === "MIDDLE"
+                                  ? "MID"
+                                  : role === "BOTTOM"
+                                  ? "ADC"
+                                  : role === "UTILITY"
+                                  ? "SUPP"
+                                  : role}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => refreshRecommendations()}
+                        className="px-2 py-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--team-accent)] transition-all"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+
+                    {mlError && (
+                      <div className="text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest px-1 animate-pulse">
+                        ⚠️ {mlError}
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-1 pb-1">
+                      {activeMlSuggest ? (
+                        <div className="grid grid-cols-4 lg:grid-cols-6 gap-2">
+                          {visibleRecommendations.map(({ rec, champ }) => (
+                            <div
+                              key={`${selectedRole}-${rec.champion}`}
+                              className="group flex flex-col items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2 hover:border-[var(--team-accent)] transition-all cursor-pointer hover:bg-[var(--surface-color)] hover:scale-[1.02]"
+                              onClick={() => {
+                                if (!champ) return;
+                                setSelectedRec({ rec, champ });
+                                setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
+                                if (stagedChampion?.name !== champ.name) {
+                                  handleSelectChampion(champ);
+                                }
+                              }}
+                            >
+                              <div className="relative">
+                                {champ ? (
+                                  <img 
+                                    src={champ.icon} 
+                                    alt={champ.name} 
+                                    className="w-14 h-14 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--team-accent)] transition-all" 
+                                  />
+                                ) : (
+                                  <div className="w-14 h-14 border-2 border-[var(--border-color)] bg-[var(--surface-color)] rounded-lg" />
+                                )}
+                                <div className="absolute -top-1 -right-1 bg-[var(--team-accent)] text-[var(--bg-color)] text-[8px] font-black px-1 rounded border border-[var(--bg-color)]">
+                                  {(rec.score * 100).toFixed(0)}%
+                                </div>
                               </div>
-                              <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
-                                {(rec.score * 100).toFixed(1)}%
+
+                              <div className="w-full text-center">
+                                <div className="truncate font-black uppercase tracking-tighter text-[9px] text-[var(--text-secondary)] group-hover:text-white">
+                                  {champ ? champ.name : rec.champion}
+                                </div>
                               </div>
                             </div>
-                            {rec.tactical && <div className="text-[10px] text-[#aaa] mt-1 leading-snug">{rec.tactical}</div>}
-                          </div>
-                        </div>
-                      ))}
+                          ))}
 
-                      {visibleRecommendations.length === 0 && (
-                        <div className="text-[#444] text-xs font-bold uppercase tracking-widest">No recommendations</div>
+                          {visibleRecommendations.length === 0 && (
+                            <div className="col-span-full text-[var(--text-muted)] text-[9px] font-black uppercase tracking-widest text-center py-4 opacity-40">
+                              No recommendations
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-[9px] font-black uppercase tracking-widest animate-pulse">
+                          Analyzing...
+                        </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-[#444] text-xs font-bold uppercase tracking-widest">Waiting for ML...</div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          <div className="flex flex-col gap-5 w-[220px]">
+          <div className="pick-column flex-1 flex flex-col gap-2 min-w-[180px]">
             {theirTeam.map((player: any, i: number) => {
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
@@ -766,6 +906,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                       index={i}
                       team="red"
                       playerName={`Enemy ${i + 1}`}
+                      isActive={currentAction.type === "pick" && currentAction.team === "red" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      isLowTime={isLowTime && currentAction.type === "pick" && currentAction.team === "red" && player.cellId === session.actions.flat().find((a: any) => a.isInProgress && !a.completed)?.actorCellId}
+                      animationDuration={blinkDuration}
                   />
               );
             })}
