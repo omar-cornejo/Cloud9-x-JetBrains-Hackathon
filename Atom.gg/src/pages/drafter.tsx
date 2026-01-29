@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Champion, DraftConfig, TeamPlayers } from "../types/draft";
 import type { MlRole, MlSuggestPayload, MlResponse, MlRecommendation } from "../types/ml";
@@ -42,6 +42,11 @@ function Drafter({ config, onBack }: DrafterProps) {
   const [champions, setChampions] = useState<Champion[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [stagedChampion, setStagedChampion] = useState<Champion | null>(null);
+  const stagedChampionRef = useRef<Champion | null>(null);
+  const lastHandledTurnRef = useRef<number>(-1);
+  useEffect(() => {
+    stagedChampionRef.current = stagedChampion;
+  }, [stagedChampion]);
   const [gameNumber, setGameNumber] = useState(1);
   const [isTeam1Blue, setIsTeam1Blue] = useState(config.isTeam1Blue);
   const [globalLockedChampions, setGlobalLockedChampions] = useState<Set<string>>(new Set());
@@ -70,6 +75,13 @@ function Drafter({ config, onBack }: DrafterProps) {
 
   const [currentTurn, setCurrentTurn] = useState(0);
   const [timeLeft, setTimeLeft] = useState(30);
+
+  const blinkDuration = useMemo(() => {
+    if (timeLeft > 20) return "2.0s";
+    if (timeLeft > 10) return "1.2s";
+    if (timeLeft > 5) return "0.8s";
+    return "0.6s";
+  }, [timeLeft]);
 
   const championByName = useMemo(() => {
     const map = new Map<string, Champion>();
@@ -229,7 +241,7 @@ function Drafter({ config, onBack }: DrafterProps) {
     const interval = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
-          handleSelectChampion(NONE_CHAMPION);
+          handleSelectChampion(stagedChampionRef.current || NONE_CHAMPION);
           return 30;
         }
         return prev - 1;
@@ -255,8 +267,10 @@ function Drafter({ config, onBack }: DrafterProps) {
   const handleSelectChampion = useCallback(
     (champion: Champion) => {
       if (currentTurn >= DRAFT_SEQUENCE.length) return;
+      if (lastHandledTurnRef.current === currentTurn) return;
       if (champion.name !== "none" && allLockedNames.has(champion.name)) return;
 
+      lastHandledTurnRef.current = currentTurn;
       const turn = DRAFT_SEQUENCE[currentTurn];
       const isBlue = turn.team === "blue";
       const isBan = turn.type === "ban";
@@ -309,7 +323,7 @@ function Drafter({ config, onBack }: DrafterProps) {
         refreshRecommendationsForTurn(currentTurn + 1);
       }
 
-      setCurrentTurn((prev) => prev + 1);
+      setCurrentTurn(currentTurn + 1);
       setStagedChampion(null);
     },
     [currentTurn, allLockedNames, refreshRecommendationsForTurn]
@@ -365,6 +379,7 @@ function Drafter({ config, onBack }: DrafterProps) {
 
     setGlobalLockedChampions(newLocked);
     setGameNumber((prev) => prev + 1);
+    lastHandledTurnRef.current = -1;
 
     // Tell ML we are moving to the next match (preserves Fearless/Ironman carry-over).
     invoke("ml_next_game")
@@ -443,25 +458,25 @@ function Drafter({ config, onBack }: DrafterProps) {
   }, [redPicks, stagedChampion, currentTurn, isDraftComplete]);
 
   return (
-    <div className="flex flex-col h-full w-full p-3 lg:p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
-      <div className="absolute top-2 lg:top-4 left-1/2 -translate-x-1/2 text-[#3498db] font-black uppercase tracking-[0.2em] bg-[#1a1a1a] px-6 py-1.5 border-2 border-[#333] rounded-full text-[10px] lg:text-xs shadow-xl z-10">
-        Game {gameNumber} / {config.numGames} <span className="mx-2 text-[#444]">|</span> {config.mode} Mode
+    <div className="flex flex-col h-full w-full p-4 lg:p-6 bg-[var(--bg-color)] text-[var(--text-primary)] font-sans box-border relative overflow-hidden">
+      <div className="absolute top-2 lg:top-4 left-1/2 -translate-x-1/2 text-[var(--accent-blue)] font-black uppercase tracking-[0.3em] bg-[var(--surface-color)] px-8 py-2 border-2 border-[var(--border-color)] rounded-full text-sm lg:text-base shadow-[0_10px_20px_rgba(0,0,0,0.4)] z-10">
+        Game {gameNumber} / {config.numGames} <span className="mx-3 text-[var(--text-muted)] opacity-30">|</span> {config.mode} Mode
       </div>
 
       {isDraftFinalized && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 animate-in fade-in duration-300">
-          <div className="bg-[#1a1a1a] p-12 border-2 border-[#3498db] rounded-2xl flex flex-col items-center gap-8 shadow-[0_0_50px_rgba(52,152,219,0.2)]">
-            <div className="flex flex-col items-center gap-2">
-              <h2 className="text-4xl font-black uppercase tracking-[0.1em]">Draft Complete</h2>
-              <div className="h-1 w-20 bg-[#3498db] rounded-full" />
+        <div className="absolute inset-0 bg-[var(--bg-color)]/80 backdrop-blur-xl flex items-center justify-center z-50 animate-in fade-in duration-300">
+          <div className="bg-[var(--surface-color)] p-14 border-2 border-[var(--accent-blue)]/30 rounded-3xl flex flex-col items-center gap-10 shadow-[0_0_80px_rgba(0,209,255,0.15)] max-w-2xl w-full mx-4">
+            <div className="flex flex-col items-center gap-3">
+              <h2 className="text-5xl font-black uppercase tracking-tight text-white">Draft Complete</h2>
+              <div className="h-1.5 w-24 bg-[var(--accent-blue)] rounded-full shadow-[0_0_20px_rgba(0,209,255,0.5)]" />
             </div>
             
             {hasMoreGames ? (
-              <div className="flex flex-col items-center gap-6">
-                <div className="flex items-center gap-8 bg-[#252525] p-6 rounded-xl border border-[#333]">
-                  <div className="flex flex-col items-center gap-2 min-w-[150px]">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-[#666]">Blue Side</span>
-                    <span className="text-xl font-black uppercase tracking-widest text-[#3498db]">{isTeam1Blue ? config.team1 : config.team2}</span>
+              <div className="flex flex-col items-center gap-8 w-full">
+                <div className="flex items-center gap-10 bg-[var(--bg-color)] p-8 rounded-2xl border border-[var(--border-color)] w-full justify-center">
+                  <div className="flex flex-col items-center gap-2 min-w-[180px]">
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Blue Side</span>
+                    <span className="text-2xl font-black uppercase tracking-tight text-[var(--accent-blue)]">{isTeam1Blue ? config.team1 : config.team2}</span>
                   </div>
                   
                   <button
@@ -477,32 +492,32 @@ function Drafter({ config, onBack }: DrafterProps) {
                           setMlError("Failed to update ML sides");
                         });
                     }}
-                    className="p-3 bg-[#1a1a1a] hover:bg-[#333] border border-[#444] rounded-full text-[#3498db] transition-all group"
+                    className="p-4 bg-[var(--surface-color)] hover:bg-[var(--surface-color-hover)] border border-[var(--border-color)] rounded-full text-[var(--accent-blue)] transition-all group shadow-lg"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 transform group-hover:rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 transform group-hover:rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                     </svg>
                   </button>
 
-                  <div className="flex flex-col items-center gap-2 min-w-[150px]">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-[#666]">Red Side</span>
-                    <span className="text-xl font-black uppercase tracking-widest text-[#e74c3c]">{isTeam1Blue ? config.team2 : config.team1}</span>
+                  <div className="flex flex-col items-center gap-2 min-w-[180px]">
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Red Side</span>
+                    <span className="text-2xl font-black uppercase tracking-tight text-[var(--accent-red)]">{isTeam1Blue ? config.team2 : config.team1}</span>
                   </div>
                 </div>
 
                 <button
                   onClick={handleNextGame}
-                  className="group relative bg-[#3498db] hover:bg-[#2980b9] text-white px-12 py-5 font-black uppercase tracking-[0.2em] rounded-lg transition-all transform hover:scale-105 active:scale-95 shadow-[0_0_30px_rgba(52,152,219,0.3)]"
+                  className="group relative bg-[var(--accent-blue)] hover:brightness-110 text-[var(--bg-color)] px-14 py-5 font-black uppercase tracking-[0.2em] rounded-xl transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_20px_40px_rgba(0,209,255,0.2)] text-base"
                 >
                   Start Game {gameNumber + 1}
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-6">
-                <p className="text-[#666] uppercase tracking-[0.3em] font-bold text-sm">Series Finished</p>
+              <div className="flex flex-col items-center gap-8">
+                <p className="text-[var(--text-muted)] uppercase tracking-[0.4em] font-black text-sm">Series Finished</p>
                 <button
                   onClick={onBack}
-                  className="bg-[#3498db] hover:bg-[#2980b9] text-white px-12 py-5 font-black uppercase tracking-[0.2em] rounded-lg transition-all"
+                  className="bg-[var(--accent-blue)] hover:brightness-110 text-[var(--bg-color)] px-14 py-5 font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-[0_20px_40px_rgba(0,209,255,0.2)]"
                 >
                   Back to Setup
                 </button>
@@ -513,22 +528,24 @@ function Drafter({ config, onBack }: DrafterProps) {
       )}
 
       <div className="flex justify-between items-start mb-2">
-        <div className="flex flex-col gap-2">
-          <div className="text-base font-bold uppercase tracking-widest text-[#3498db]">
-            {blueTeamName} <span className="text-[#666]">bans</span>
+        <div className="flex flex-col gap-3">
+          <div className="text-lg font-black uppercase tracking-tighter text-[var(--accent-blue)] flex items-center gap-3">
+            <span className="px-3 py-0.5 bg-[var(--accent-blue)] text-[var(--bg-color)] rounded text-[11px]">BLUE</span>
+            {blueTeamName}
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-2">
             {effectiveBlueBans.map((ban, i) => (
               <BanSlot
                 key={i}
                 ban={ban}
                 isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "ban" && DRAFT_SEQUENCE[currentTurn].index === i}
+                animationDuration={blinkDuration}
               />
             ))}
           </div>
           <button
             onClick={onBack}
-            className="mt-1 flex items-center justify-center gap-2 px-2 py-1 bg-[#1a1a1a] border border-[#333] rounded text-[10px] font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group w-fit"
+            className="mt-2 flex items-center justify-center gap-2 px-3 py-1.5 bg-[var(--surface-color)] border border-[var(--border-color)] rounded text-[11px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all group w-fit"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -540,11 +557,11 @@ function Drafter({ config, onBack }: DrafterProps) {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                strokeWidth={2}
+                strokeWidth={2.5}
                 d="M15 19l-7-7 7-7"
               />
             </svg>
-            Back
+            Abort Draft
           </button>
         </div>
 
@@ -556,28 +573,30 @@ function Drafter({ config, onBack }: DrafterProps) {
           redTeamName={redTeamName}
         />
 
-        <div className="flex flex-col gap-2">
-          <div className="text-base font-bold uppercase tracking-widest text-right text-[#e74c3c]">
-            {redTeamName} <span className="text-[#666]">bans</span>
+        <div className="flex flex-col gap-3 items-end">
+          <div className="text-lg font-black uppercase tracking-tighter text-[var(--accent-red)] flex items-center gap-3">
+            {redTeamName}
+            <span className="px-3 py-0.5 bg-[var(--accent-red)] text-[var(--bg-color)] rounded text-[11px]">RED</span>
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-2">
             {effectiveRedBans.map((ban, i) => (
               <BanSlot
                 key={i}
                 ban={ban}
                 isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "ban" && DRAFT_SEQUENCE[currentTurn].index === i}
+                animationDuration={blinkDuration}
               />
             ))}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 justify-between gap-4 min-h-0">
-        <div className="flex flex-col gap-3 w-[200px] lg:w-[240px]">
+      <div className="flex flex-1 justify-between gap-6 min-h-0">
+        <div className="flex flex-col gap-4 w-[200px] lg:w-[240px]">
           {mlSuggest && typeof mlSuggest.blue_winrate === "number" && (
-            <div className="flex flex-col items-center p-1.5 bg-[#1a1a1a] border border-[#333] rounded mb-[-8px] z-10">
-              <span className="text-[9px] font-black uppercase tracking-widest text-[#666]">Blue Winrate</span>
-              <span className="text-lg font-black text-[#3498db]">{(mlSuggest.blue_winrate * 100).toFixed(1)}%</span>
+            <div className="flex flex-col items-center p-2 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-lg mb-[-12px] z-10 shadow-lg">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Blue Win Rate</span>
+              <span className="text-2xl font-black text-[var(--accent-blue)] tracking-tighter">{(mlSuggest.blue_winrate * 100).toFixed(1)}%</span>
             </div>
           )}
           {effectiveBluePicks.map((pick, i) => (
@@ -590,22 +609,28 @@ function Drafter({ config, onBack }: DrafterProps) {
                 isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
                 onClick={() => handleSwap("blue", i)}
                 isSwapSource={swapSource?.team === "blue" && swapSource.index === i}
+                animationDuration={blinkDuration}
               />
           ))}
         </div>
 
-        <div className="flex-1 flex flex-col gap-2 min-w-0">
+        <div className="flex-1 flex flex-col gap-3 min-w-0">
           <div className="flex flex-col items-end">
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-[130px] h-[26px] border border-[#444] bg-[#252525] px-3 text-[11px] focus:outline-none focus:border-[#3498db] transition-colors rounded uppercase font-bold tracking-widest"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search champions..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-[270px] h-[32px] border-2 border-[var(--border-color)] bg-[var(--surface-color)] px-4 text-[12px] focus:outline-none focus:border-[var(--accent-blue)] transition-all rounded-lg uppercase font-black tracking-widest text-[var(--text-primary)] placeholder:text-[var(--text-muted)] placeholder:opacity-50"
+              />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
           </div>
-          <div className="flex-[2.1] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-2 relative no-scrollbar rounded shadow-inner">
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(50px,1fr))] gap-3">
+          <div className="flex-[2.0] border-2 border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-4 relative no-scrollbar rounded-xl shadow-[inset_0_4px_12px_rgba(0,0,0,0.2)]">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(70px,1fr))] gap-5">
               {filteredChampions.map((champ) => (
                 <ChampionCard
                   key={champ.id}
@@ -620,66 +645,65 @@ function Drafter({ config, onBack }: DrafterProps) {
           <button
             onClick={() => stagedChampion && handleSelectChampion(stagedChampion)}
             disabled={!stagedChampion}
-            className={`w-full py-2.5 rounded font-black uppercase tracking-[0.2em] text-sm transition-all transform active:scale-95 ${
+            className={`w-full py-2 rounded-xl font-black uppercase tracking-[0.25em] text-base transition-all transform active:scale-[0.98] border-2 ${
               stagedChampion 
-                ? "bg-[#3498db] hover:bg-[#2980b9] text-white shadow-[0_0_15px_rgba(52,152,219,0.3)]" 
-                : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
+                ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-[var(--bg-color)] shadow-[0_10px_20px_rgba(0,209,255,0.25)] brightness-110" 
+                : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-50"
             }`}
           >
-            Confirm
+            Lock Champion
           </button>
-          <div className="flex-[1.8] border-2 border-[#333] bg-[#1a1a1a] rounded overflow-hidden relative">
+          <div className="flex-[1.8] border-2 border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl overflow-hidden relative shadow-lg">
             {selectedRec ? (
-              <div className="absolute inset-0 bg-black/90 p-4 flex flex-col gap-4 animate-in fade-in duration-300 z-20">
-                <button 
-                  onClick={() => setSelectedRec(null)}
-                  className="absolute top-2 right-2 px-3 py-1 bg-[#252525] border border-[#444] rounded text-[10px] font-bold uppercase tracking-widest text-white hover:bg-[#333] transition-colors"
-                >
-                  Back
-                </button>
-                
-                <div className="flex items-center gap-4 mt-1">
+              <div className="absolute inset-0 bg-[var(--bg-color)]/95 p-1 flex gap- animate-in fade-in duration-300 z-20">
+                <div className="w-[100px] flex flex-col items-center gap-3 shrink-0 mt-2">
                   {selectedRec.champ ? (
                     <img
                       src={selectedRec.champ.icon}
                       alt={selectedRec.champ.name}
-                      className="w-16 h-16 border-2 border-[#3498db] rounded-lg shadow-lg"
+                      className="w-12 h-12 border-2 border-[var(--accent-blue)] rounded-lg shadow-[0_0_15px_rgba(0,209,255,0.2)]"
                     />
                   ) : (
-                    <div className="w-16 h-16 border-2 border-[#3498db] bg-[#222] rounded-lg" />
+                    <div className="w-12 h-12 border-2 border-[var(--accent-blue)] bg-[var(--surface-color)] rounded-lg" />
                   )}
-                  <div className="flex flex-col">
-                    <div className="text-xl font-black uppercase tracking-wider">
+                  <div className="flex flex-col gap-0.5 items-center text-center w-full">
+                    <div className="text-[13px] font-black uppercase tracking-tight text-white truncate w-full">
                       {selectedRec.champ ? selectedRec.champ.name : selectedRec.rec.champion}
                     </div>
-                    <div className="text-sm font-bold text-[#3498db] uppercase tracking-widest">
-                      {(selectedRec.rec.score * 100).toFixed(1)}% Win Rate
+                    <div className="text-[10px] font-black text-[var(--accent-blue)] uppercase tracking-wider">
+                      {(selectedRec.rec.score * 100).toFixed(0)}% Rec.
                     </div>
+                    <button 
+                      onClick={() => setSelectedRec(null)}
+                      className="mt-2 px-3 py-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-md text-[9px] font-black uppercase tracking-widest text-white hover:bg-[var(--surface-color-hover)] transition-colors shadow-sm"
+                    >
+                      Back
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex-1 bg-[#1a1a1a]/80 border border-[#333] rounded-lg p-3 text-base leading-relaxed text-gray-300 italic overflow-y-auto no-scrollbar whitespace-pre-line">
+                <div className="flex-1 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl p-3 text-sm leading-relaxed text-[var(--text-secondary)] italic overflow-y-auto no-scrollbar whitespace-pre-line shadow-inner">
                   {selectedRec.rec.tactical || "No detailed analysis available for this champion."}
                 </div>
               </div>
             ) : (
-              <div className="w-full h-full p-2 flex flex-col gap-6">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-4 overflow-hidden">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-[#3498db] whitespace-nowrap">
+              <div className="w-full h-full p-2 flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <div className="flex items-center gap-6 overflow-hidden">
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-[var(--accent-blue)] whitespace-nowrap">
                       {suggestContext.label}
                     </span>
-                    <div className="flex gap-1 overflow-x-auto no-scrollbar">
+                    <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
                       {UI_ROLES.map((role) => (
                         <button
                           key={role}
                           onClick={() => {
                             setSelectedRole(role);
                           }}
-                          className={`px-2 py-1.5 rounded border text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                          className={`px-3 py-2 rounded-lg border-2 text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${
                             selectedRole === role
-                              ? "bg-[#3498db] border-[#3498db] text-white"
-                              : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                              ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-[var(--bg-color)] shadow-md"
+                              : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)]"
                           }`}
                           title={role}
                         >
@@ -691,27 +715,21 @@ function Drafter({ config, onBack }: DrafterProps) {
                       ))}
                     </div>
                   </div>
-                  <button
-                    onClick={() => refreshRecommendations()}
-                    className="flex-shrink-0 px-2 py-1 bg-[#252525] border border-[#333] rounded text-[9px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
-                  >
-                    Refresh
-                  </button>
                 </div>
 
                 {mlError && (
-                  <div className="text-[#e74c3c] text-[10px] font-bold uppercase tracking-widest px-1">
-                    {mlError}
+                  <div className="text-[var(--accent-red)] text-[11px] font-black uppercase tracking-widest px-2 animate-pulse">
+                    ⚠️ {mlError}
                   </div>
                 )}
 
-                <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar">
+                <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-1 pb-1">
                   {mlSuggest ? (
-                    <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                    <div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                       {visibleRecommendations.map(({ rec, champ }) => (
                         <div
                           key={`${selectedRole}-${rec.champion}`}
-                          className="group flex flex-col items-center gap-1.5 border border-[#333] bg-[#141414] rounded p-2 hover:border-[#3498db] transition-all cursor-pointer hover:bg-[#1a1a1a] hover:scale-[1.02]"
+                          className="group flex flex-col items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2.5 hover:border-[var(--accent-blue)] transition-all cursor-pointer hover:bg-[var(--surface-color)] hover:scale-[1.03] shadow-md"
                           onClick={() => {
                             setSelectedRec({ rec, champ });
                             if (champ) setStagedChampion(champ);
@@ -722,18 +740,18 @@ function Drafter({ config, onBack }: DrafterProps) {
                               <img
                                 src={champ.icon}
                                 alt={champ.name}
-                                className="w-10 h-10 border border-[#222] rounded shadow-md group-hover:border-[#3498db] transition-colors"
+                                className="w-12 h-12 border border-[var(--border-color)] rounded shadow-md group-hover:border-[var(--accent-blue)] transition-colors"
                               />
                             ) : (
-                              <div className="w-10 h-10 border border-[#222] bg-[#222] rounded" />
+                              <div className="w-12 h-12 border border-[var(--border-color)] bg-[var(--surface-color)] rounded" />
                             )}
-                            <div className="absolute -top-1 -right-1 bg-[#3498db] text-white text-[10px] font-black px-1 rounded border border-[#141414] shadow-sm">
+                            <div className="absolute -top-1.5 -right-1.5 bg-[var(--accent-blue)] text-[var(--bg-color)] text-[10px] font-black px-1.5 rounded border border-[var(--bg-color)] shadow-sm">
                               {(rec.score * 100).toFixed(0)}%
                             </div>
                           </div>
 
                           <div className="w-full text-center">
-                            <div className="truncate font-black uppercase tracking-tighter text-[12px] text-gray-300">
+                            <div className="truncate font-black uppercase tracking-tighter text-[11px] text-[var(--text-secondary)] group-hover:text-white">
                               {champ ? champ.name : rec.champion}
                             </div>
                           </div>
@@ -741,14 +759,14 @@ function Drafter({ config, onBack }: DrafterProps) {
                       ))}
 
                       {visibleRecommendations.length === 0 && (
-                        <div className="col-span-full text-[#444] text-[10px] font-bold uppercase tracking-widest text-center py-4">
-                          No suggestions
+                        <div className="col-span-full text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest text-center py-8 opacity-40">
+                          No recommendations available
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="flex items-center justify-center h-full text-[#444] text-[10px] font-bold uppercase tracking-widest animate-pulse">
-                      Waiting for ML...
+                    <div className="flex items-center justify-center h-full text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest animate-pulse">
+                      Analyzing Draft Patterns...
                     </div>
                   )}
                 </div>
@@ -757,11 +775,11 @@ function Drafter({ config, onBack }: DrafterProps) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 w-[200px] lg:w-[240px]">
+        <div className="flex flex-col gap-4 w-[200px] lg:w-[240px]">
           {mlSuggest && typeof mlSuggest.red_winrate === "number" && (
-            <div className="flex flex-col items-center p-1.5 bg-[#1a1a1a] border border-[#333] rounded mb-[-8px] z-10">
-              <span className="text-[9px] font-black uppercase tracking-widest text-[#666]">Red Winrate</span>
-              <span className="text-lg font-black text-[#e74c3c]">{(mlSuggest.red_winrate * 100).toFixed(1)}%</span>
+            <div className="flex flex-col items-center p-2 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-lg mb-[-12px] z-10 shadow-lg">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Red Win Rate</span>
+              <span className="text-2xl font-black text-[var(--accent-red)] tracking-tighter">{(mlSuggest.red_winrate * 100).toFixed(1)}%</span>
             </div>
           )}
           {effectiveRedPicks.map((pick, i) => (
@@ -774,6 +792,7 @@ function Drafter({ config, onBack }: DrafterProps) {
               isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
               onClick={() => handleSwap("red", i)}
               isSwapSource={swapSource?.team === "red" && swapSource.index === i}
+              animationDuration={blinkDuration}
             />
           ))}
 
@@ -781,10 +800,10 @@ function Drafter({ config, onBack }: DrafterProps) {
             <div className="mt-auto pt-4 animate-in slide-in-from-bottom-4 duration-500">
               <button
                 onClick={() => setIsFinalized(true)}
-                className="w-full group relative bg-[#3498db] hover:bg-[#2980b9] text-white py-4 font-black uppercase tracking-[0.15em] rounded transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(52,152,219,0.3)] flex items-center justify-center gap-2 text-sm"
+                className="w-full group relative bg-[var(--accent-blue)] hover:brightness-110 text-[var(--bg-color)] py-5 font-black uppercase tracking-[0.2em] rounded-xl transition-all transform hover:scale-[1.02] active:scale-95 shadow-[0_15px_30px_rgba(0,209,255,0.2)] flex items-center justify-center gap-3 text-base"
               >
                 <span>Finalize Draft</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                 </svg>
               </button>

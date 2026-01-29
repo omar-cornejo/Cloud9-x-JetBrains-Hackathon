@@ -31,28 +31,29 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
   }
 
   return (
-      <div className="flex flex-col items-center justify-center h-full w-full bg-[#121212] text-white p-10 font-sans overflow-y-auto">
-        <div className="flex flex-col items-center gap-4 mb-8">
-          <h1 className="text-6xl font-black text-center uppercase tracking-widest text-[#3498db]">
-            Live Draft
+      <div className="flex flex-col items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)] p-10 font-sans overflow-y-auto">
+        <div className="flex flex-col items-center gap-5 mb-10">
+          <h1 className="text-7xl font-black text-center uppercase tracking-tight text-white">
+            Live <span className="text-[var(--accent-blue)]">Draft</span>
           </h1>
-          <p className="text-[#666] font-bold uppercase tracking-widest text-center">
-            Waiting for Champion Select...
+          <p className="text-[var(--text-muted)] font-black uppercase tracking-[0.3em] text-[11px] opacity-60">
+            Scanning for LCU Match Patterns...
           </p>
         </div>
 
-        <div className="bg-[#1a1a1a] border-2 border-[#333] p-10 rounded-3xl shadow-2xl flex flex-col items-center gap-8 w-full max-w-lg">
-          <div className="flex flex-col items-center gap-6 py-10">
+        <div className="bg-[var(--surface-color)] border-2 border-[var(--border-color)] p-12 rounded-3xl shadow-2xl flex flex-col items-center gap-10 w-full max-w-xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--accent-blue)] to-transparent opacity-20" />
+          <div className="flex flex-col items-center gap-8 py-6">
             <div className="relative">
-              <div className="w-20 h-20 border-4 border-[#3498db]/20 border-t-[#3498db] rounded-full animate-spin"></div>
+              <div className="w-24 h-24 border-4 border-[var(--accent-blue)]/10 border-t-[var(--accent-blue)] rounded-full animate-spin shadow-[0_0_30px_rgba(0,209,255,0.15)]"></div>
             </div>
             
-            <div className="flex flex-col items-center gap-2">
-              <p className="text-xl font-bold text-white text-center">
-                Live Draft View will load automatically
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-2xl font-black text-white text-center uppercase tracking-tight">
+                Automatic Integration
               </p>
-              <p className="text-[#888] text-center">
-                Enter a match in the League of Legends client to use atom.gg drafter
+              <p className="text-[var(--text-secondary)] text-center max-w-sm font-medium leading-relaxed italic">
+                The AI drafter will launch as soon as you enter champion select in your League client.
               </p>
             </div>
           </div>
@@ -60,9 +61,9 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
 
         <button
             onClick={onBack}
-            className="mt-8 text-[#444] hover:text-[#3498db] font-black uppercase tracking-widest transition-colors duration-300"
+            className="mt-12 text-[var(--text-muted)] hover:text-[var(--accent-blue)] font-black uppercase tracking-[0.25em] text-[11px] transition-all duration-300 flex items-center gap-3"
         >
-          ← Back to Home
+          <span className="text-lg">←</span> Back Home
         </button>
       </div>
   );

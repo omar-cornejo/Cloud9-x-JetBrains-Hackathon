@@ -10,22 +10,27 @@ interface ChampionCardProps {
 export function ChampionCard({ champion, isSelected, isStaged, onSelect }: ChampionCardProps) {
   return (
     <div
-      className={`flex flex-col items-center gap-1 group cursor-pointer ${
+      className={`flex flex-col items-center gap-1.5 group cursor-pointer ${
         isSelected ? "opacity-20 grayscale pointer-events-none" : ""
       }`}
       onClick={() => onSelect(champion)}
     >
-      <img
-        src={champion.icon}
-        alt={champion.name}
-        className={`w-[50px] h-[50px] lg:w-[60px] lg:h-[60px] border-2 transition-all duration-200 ${
-          isStaged 
-            ? "border-[#3498db] scale-110 shadow-[0_0_15px_rgba(52,152,219,0.5)]" 
-            : "border-[#333] group-hover:border-[#3498db]"
-        }`}
-      />
-      <span className={`text-[11px] text-center truncate w-full transition-colors ${
-        isStaged ? "text-[#3498db] font-black" : "text-[#ccc] group-hover:text-white font-bold"
+      <div className="relative">
+        <img
+          src={champion.icon}
+          alt={champion.name}
+          className={`w-[55px] h-[55px] lg:w-[65px] lg:h-[65px] border-2 transition-all duration-300 rounded-sm ${
+            isStaged 
+              ? "border-[var(--accent-blue)] scale-110 shadow-[0_0_20px_rgba(0,209,255,0.4)] z-10" 
+              : "border-[var(--border-color)] group-hover:border-[var(--text-secondary)]"
+          }`}
+        />
+        {isStaged && (
+          <div className="absolute inset-0 bg-[var(--accent-blue)]/10 animate-pulse pointer-events-none" />
+        )}
+      </div>
+      <span className={`text-[12px] text-center truncate w-full transition-colors tracking-tight ${
+        isStaged ? "text-[var(--accent-blue)] font-black" : "text-[var(--text-secondary)] group-hover:text-white font-bold"
       }`}>
         {champion.name}
       </span>

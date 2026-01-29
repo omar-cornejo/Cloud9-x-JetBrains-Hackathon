@@ -488,13 +488,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
 
     if (!currentAction.isMyTurn) {
-      if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Enemy Banning</span>;
-      if (currentAction.type === "pick") return <span className="text-[#3498db]">Enemy Picking</span>;
+      if (currentAction.type === "ban") return <span className="text-[var(--accent-red)]">Enemy Banning</span>;
+      if (currentAction.type === "pick") return <span className="text-[var(--accent-blue)]">Enemy Picking</span>;
       return "Waiting...";
     }
 
-    if (currentAction.type === "ban") return <span className="text-[#e74c3c]">Ban a Champion</span>;
-    if (currentAction.type === "pick") return <span className="text-[#3498db]">Pick a Champion</span>;
+    if (currentAction.type === "ban") return <span className="text-[var(--accent-red)]">Ban a Champion</span>;
+    if (currentAction.type === "pick") return <span className="text-[var(--accent-blue)]">Pick a Champion</span>;
     return "Waiting...";
   };
 
@@ -519,10 +519,10 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   // Keep these returns AFTER all hooks to preserve hook order.
   if (!session && !error) {
     return (
-      <div className="flex items-center justify-center h-full w-full bg-[#121212] text-white">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-[#3498db] border-t-transparent rounded-full animate-spin" />
-          <p className="text-xl font-bold uppercase tracking-widest text-[#3498db]">Loading Session...</p>
+      <div className="flex items-center justify-center h-full w-full bg-[var(--bg-color)] text-[var(--text-primary)]">
+        <div className="flex flex-col items-center gap-6">
+          <div className="w-16 h-16 border-4 border-[var(--accent-blue)] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_rgba(0,209,255,0.2)]" />
+          <p className="text-2xl font-black uppercase tracking-[0.2em] text-[var(--accent-blue)] animate-pulse">Syncing with LCU...</p>
         </div>
       </div>
     );
@@ -533,13 +533,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }
 
   return (
-      <div className="flex flex-col h-full w-full p-5 bg-[#121212] text-white font-sans box-border relative overflow-hidden">
-        <div className="flex justify-between items-start mb-8">
-          <div className="flex flex-col gap-2">
-            <div className="text-lg font-bold uppercase tracking-widest text-[#3498db]">
-              Blue Side <span className="text-[#e74c3c]">bans</span>
+      <div className="flex flex-col h-full w-full p-6 bg-[var(--bg-color)] text-[var(--text-primary)] font-sans box-border relative overflow-hidden">
+        <div className="flex justify-between items-start mb-10">
+          <div className="flex flex-col gap-3">
+            <div className="text-xl font-black uppercase tracking-tighter text-[var(--accent-blue)]">
+              Blue Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
                   <BanSlot key={i} ban={getChamp(id)} />
               ))}
@@ -549,38 +549,53 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
             <button
                 onClick={onBack}
-                className="mt-2 flex items-center justify-center gap-2 px-3 py-1.5 bg-[#1a1a1a] border border-[#333] rounded-lg text-[10px] font-bold uppercase tracking-widest text-[#666] hover:text-white hover:border-[#444] transition-all group w-fit"
+                className="mt-3 flex items-center justify-center gap-2 px-4 py-2 bg-[var(--surface-color)] border border-[var(--border-color)] rounded-xl text-[11px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all group w-fit shadow-md"
             >
-              Back
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 transform group-hover:-translate-x-1 transition-transform"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d="M15 19l-7-7 7-7"
+                />
+              </svg>
+              Exit Live Draft
             </button>
           </div>
 
-          <div className="flex flex-col items-center gap-3">
-            <div className="text-3xl font-black text-[#3498db]">LIVE SESSION</div>
-            <div className="text-xs text-[#666] uppercase tracking-widest font-bold">
-              {session.isCustomGame ? "Custom Game" : "Ranked Game"}
+          <div className="flex flex-col items-center gap-4">
+            <div className="text-4xl font-black text-white tracking-tighter drop-shadow-[0_0_20px_rgba(0,209,255,0.2)]">LIVE <span className="text-[var(--accent-blue)]">INTEGRATION</span></div>
+            <div className="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.4em] font-black bg-[var(--surface-color)] px-4 py-1 rounded-full border border-[var(--border-color)]">
+              {session.isCustomGame ? "Tournament / Custom" : "Matchmade Session"}
             </div>
 
             {/* Timer and Phase Display */}
-            <div className="flex flex-col items-center gap-2 bg-[#1a1a1a] border-2 border-[#333] rounded-xl px-8 py-4 min-w-[280px]">
-              <div className={`text-sm font-bold uppercase tracking-widest ${
-                  currentAction.isMyTurn ? "text-[#3498db]" : "text-[#666]"
+            <div className="flex flex-col items-center gap-2 bg-[var(--surface-color)] border-2 border-[var(--border-color)] rounded-2xl px-12 py-5 min-w-[320px] shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--accent-blue)] to-transparent opacity-30" />
+              <div className={`text-[13px] font-black uppercase tracking-[0.2em] ${
+                  currentAction.isMyTurn ? "text-[var(--accent-blue)]" : "text-[var(--text-muted)]"
               }`}>
                 {getPhaseText()}
               </div>
-              <div className={`text-5xl font-black tabular-nums ${
+              <div className={`text-6xl font-black tabular-nums tracking-tighter transition-all duration-300 ${
                   currentAction.timeLeft <= 10
-                      ? "text-[#e74c3c] animate-pulse"
+                      ? "text-[var(--accent-red)] drop-shadow-[0_0_15px_rgba(255,75,80,0.4)] animate-pulse"
                       : currentAction.isMyTurn
-                          ? "text-white"
-                          : "text-[#444]"
+                          ? "text-white drop-shadow-[0_0_15px_rgba(0,209,255,0.3)]"
+                          : "text-[var(--text-muted)] opacity-30"
               }`}>
                 {currentAction.timeLeft}
               </div>
               {currentAction.isMyTurn && (
-                  <div className="h-1 w-full bg-[#333] rounded-full overflow-hidden mt-2">
+                  <div className="h-1.5 w-full bg-[var(--bg-color)] rounded-full overflow-hidden mt-3 border border-[var(--border-color)]">
                     <div
-                        className="h-full bg-[#3498db] rounded-full transition-all duration-1000 ease-linear"
+                        className="h-full bg-[var(--accent-blue)] rounded-full transition-all duration-1000 ease-linear shadow-[0_0_10px_rgba(0,209,255,0.5)]"
                         style={{ width: `${(currentAction.timeLeft / 30) * 100}%` }}
                     />
                   </div>
@@ -588,11 +603,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="text-lg font-bold uppercase tracking-widest text-right text-[#e74c3c]">
-              Red Side <span className="text-[#e74c3c]">bans</span>
+          <div className="flex flex-col gap-3 items-end">
+            <div className="text-xl font-black uppercase tracking-tighter text-[var(--accent-red)]">
+              Red Side <span className="text-[var(--text-muted)] opacity-50">bans</span>
             </div>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
                   <BanSlot key={i} ban={getChamp(id)} />
               ))}
@@ -603,8 +618,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
         </div>
 
-        <div className="flex flex-1 justify-between gap-8 min-h-0">
-          <div className="flex flex-col gap-5 w-[220px]">
+        <div className="flex flex-1 justify-between gap-10 min-h-0">
+          <div className="flex flex-col gap-4 w-[220px] lg:w-[260px]">
             {myTeam.map((player: any, i: number) => {
               const isCurrentPlayer = player.cellId === session.localPlayerCellId;
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
@@ -621,18 +636,23 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             })}
           </div>
 
-          <div className="flex-1 flex flex-col gap-5 min-w-0">
+          <div className="flex-1 flex flex-col gap-4 min-w-0">
             <div className="flex flex-col items-end gap-3">
-              <input
-                  type="text"
-                  placeholder="Search champion..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className={`w-[200px] h-[40px] border border-[#444] bg-[#252525] px-4 text-sm focus:outline-none focus:border-[#3498db] transition-colors rounded-lg uppercase font-bold tracking-widest`}
-              />
+              <div className="relative">
+                <input
+                    type="text"
+                    placeholder="Search champions..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-[220px] h-[36px] border-2 border-[var(--border-color)] bg-[var(--surface-color)] px-5 text-sm focus:outline-none focus:border-[var(--accent-blue)] transition-all rounded-xl uppercase font-black tracking-widest text-white placeholder:text-[var(--text-muted)] placeholder:opacity-40"
+                />
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 absolute right-4 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
             </div>
-            <div className={`flex-[3] border-2 border-[#333] bg-[#1a1a1a] overflow-y-auto p-4 relative no-scrollbar rounded-lg shadow-inner `}>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] gap-4">
+            <div className="flex-[3] border-2 border-[var(--border-color)] bg-[var(--surface-color)] overflow-y-auto p-5 relative no-scrollbar rounded-2xl shadow-[inset_0_4px_12px_rgba(0,0,0,0.3)]">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(65px,1fr))] lg:grid-cols-[repeat(auto-fill,minmax(75px,1fr))] gap-6">
                 {filteredChampions.map((champ) => (
                     <ChampionCard
                         key={champ.id}
@@ -647,51 +667,54 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             <button
                 onClick={handleConfirm}
                 disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
-                className={`w-full py-3 rounded-lg font-black uppercase tracking-[0.2em] transition-all transform active:scale-95 ${
+                className={`w-full py-2.5 rounded-xl font-black uppercase tracking-[0.25em] transition-all transform active:scale-[0.98] text-base border-2 shadow-xl ${
                     stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
                         ? getConfirmButtonColor()
-                        : "bg-[#222] text-[#444] cursor-not-allowed border border-[#333]"
+                        : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-40"
                 }`}
             >
-              {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Phase" : getConfirmButtonText()}
+              {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Game" : getConfirmButtonText()}
             </button>
 
             {canShowRecommendations && (
-              <div className="mt-4 border-2 border-[#333] bg-[#1a1a1a] rounded-lg p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-[#666] font-black uppercase tracking-[0.25em] text-xs">
-                    {suggestContext.label} ({suggestContext.mySide}{suggestContext.isBanMode ? ` vs ${suggestContext.analyzeSide}` : ""})
+              <div className="mt-6 border-2 border-[var(--border-color)] bg-[var(--surface-color)] rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--accent-blue)] to-transparent opacity-20" />
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-[var(--accent-blue)] font-black uppercase tracking-[0.2em] text-[11px] flex items-center gap-2">
+                    <span className="w-2 h-2 bg-[var(--accent-blue)] rounded-full animate-pulse" />
+                    ML PREDICTIONS ({suggestContext.label})
                   </div>
                   <button
                     onClick={() => refreshRecommendations()}
-                    className="px-3 py-1 bg-[#252525] border border-[#333] rounded-md text-[10px] font-bold uppercase tracking-widest text-[#bbb] hover:text-white hover:border-[#444] transition-all"
+                    className="px-4 py-1.5 bg-[var(--bg-color)] border border-[var(--border-color)] rounded-lg text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)] transition-all shadow-md"
                   >
                     Refresh
                   </button>
                 </div>
 
-                {activeMlSuggest && (
-                  <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-[#444]">
-                    ML: {activeMlSuggest.target_side} {activeMlSuggest.is_ban_mode ? "BAN" : "PICK"}
-                  </div>
-                )}
-
                 {activeMlSuggest && typeof activeMlSuggest.blue_winrate === "number" && typeof activeMlSuggest.red_winrate === "number" && (
-                  <div className="mt-1 text-[10px] font-black uppercase tracking-widest text-[#555]">
-                    Winrate: <span className="text-[#3498db]">BLUE</span> {(activeMlSuggest.blue_winrate * 100).toFixed(1)}% |{" "}
-                    <span className="text-[#e74c3c]">RED</span> {(activeMlSuggest.red_winrate * 100).toFixed(1)}%
+                  <div className="mb-4 flex items-center gap-6 text-[11px] font-black uppercase tracking-[0.1em] bg-[var(--bg-color)] p-3 rounded-xl border border-[var(--border-color)] w-fit">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[var(--text-muted)] opacity-50">BLUE PROB:</span>
+                      <span className="text-[var(--accent-blue)] text-base">{(activeMlSuggest.blue_winrate * 100).toFixed(1)}%</span>
+                    </div>
+                    <div className="w-px h-4 bg-[var(--border-color)]" />
+                    <div className="flex items-center gap-2">
+                      <span className="text-[var(--text-muted)] opacity-50">RED PROB:</span>
+                      <span className="text-[var(--accent-red)] text-base">{(activeMlSuggest.red_winrate * 100).toFixed(1)}%</span>
+                    </div>
                   </div>
                 )}
 
-                <div className="mt-3 flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap mb-4">
                   {UI_ROLES.map((role) => (
                     <button
                       key={role}
                       onClick={() => setSelectedRole(role)}
-                      className={`px-3 py-2 rounded-md border text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
+                      className={`px-4 py-2 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 ${
                         selectedRole === role
-                          ? "bg-[#3498db] border-[#3498db] text-white"
-                          : "bg-[#252525] border-[#333] text-[#999] hover:text-white hover:border-[#444]"
+                          ? "bg-[var(--accent-blue)] border-[var(--accent-blue)] text-[var(--bg-color)] shadow-lg"
+                          : "bg-[var(--bg-color)] border-[var(--border-color)] text-[var(--text-muted)] hover:text-white hover:border-[var(--text-secondary)]"
                       }`}
                       title={role}
                       type="button"
@@ -703,25 +726,25 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                         : role === "UTILITY"
                         ? "SUPPORT"
                         : role === "ALL"
-                        ? "TODOS"
+                        ? "ALL ROLES"
                         : role}
                     </button>
                   ))}
                 </div>
 
                 {mlError && (
-                  <div className="mt-2 text-[#e74c3c] text-xs font-bold uppercase tracking-widest">
-                    {mlError}
+                  <div className="mb-4 text-[var(--accent-red)] text-[11px] font-black uppercase tracking-widest animate-pulse">
+                    ⚠️ {mlError}
                   </div>
                 )}
 
-                <div className="mt-3 max-h-[300px] overflow-y-auto no-scrollbar pr-1">
+                <div className="max-h-[350px] overflow-y-auto no-scrollbar pr-1">
                   {activeMlSuggest ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {visibleRecommendations.map(({ rec, champ }) => (
                         <div
                           key={`${selectedRole}-${rec.champion}`}
-                          className="flex items-center gap-3 border border-[#333] bg-[#141414] rounded-lg p-3 hover:border-[#3498db] transition-colors cursor-pointer"
+                          className="flex items-center gap-4 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-xl p-3.5 hover:border-[var(--accent-blue)] transition-all cursor-pointer hover:bg-[var(--surface-color-hover)] shadow-md group"
                           onClick={() => {
                             if (!champ) return;
                             setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
@@ -731,38 +754,40 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                           }}
                         >
                           {champ ? (
-                            <img src={champ.icon} alt={champ.name} className="w-10 h-10 border border-[#333]" />
+                            <div className="relative">
+                              <img src={champ.icon} alt={champ.name} className="w-12 h-12 border-2 border-[var(--border-color)] rounded-lg group-hover:border-[var(--accent-blue)] transition-colors" />
+                              <div className="absolute -top-1.5 -right-1.5 bg-[var(--accent-blue)] text-[var(--bg-color)] text-[9px] font-black px-1.5 rounded border border-[var(--bg-color)] shadow-sm">
+                                {(rec.score * 100).toFixed(0)}%
+                              </div>
+                            </div>
                           ) : (
-                            <div className="w-10 h-10 border border-[#333] bg-[#222]" />
+                            <div className="w-12 h-12 border-2 border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg" />
                           )}
 
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="truncate font-black uppercase tracking-wide text-sm">
-                                {champ ? champ.name : rec.champion}
-                              </div>
-                              <div className="text-[10px] font-black uppercase tracking-widest text-[#3498db]">
-                                {(rec.score * 100).toFixed(1)}%
-                              </div>
+                            <div className="truncate font-black uppercase tracking-tight text-[13px] text-white">
+                              {champ ? champ.name : rec.champion}
                             </div>
-                            {rec.tactical && <div className="text-[10px] text-[#aaa] mt-1 leading-snug">{rec.tactical}</div>}
+                            {rec.tactical && <div className="text-[10px] text-[var(--text-secondary)] mt-1 leading-snug italic opacity-80 group-hover:opacity-100 transition-opacity">
+                              {rec.tactical.split('\n')[0]}
+                            </div>}
                           </div>
                         </div>
                       ))}
 
                       {visibleRecommendations.length === 0 && (
-                        <div className="text-[#444] text-xs font-bold uppercase tracking-widest">No recommendations</div>
+                        <div className="col-span-full text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest text-center py-10 opacity-30">No predictions matching criteria</div>
                       )}
                     </div>
                   ) : (
-                    <div className="text-[#444] text-xs font-bold uppercase tracking-widest">Waiting for ML...</div>
+                    <div className="text-[var(--text-muted)] text-[11px] font-black uppercase tracking-widest text-center py-10 animate-pulse">Running Neural Inference...</div>
                   )}
                 </div>
               </div>
             )}
           </div>
 
-          <div className="flex flex-col gap-5 w-[220px]">
+          <div className="flex flex-col gap-4 w-[220px] lg:w-[260px]">
             {theirTeam.map((player: any, i: number) => {
               const banId = bansFromActions.cellIdToBan.get(player.cellId);
               return (
