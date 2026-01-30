@@ -60,7 +60,7 @@ export function ClientDraft({ onBack }: ClientDraftProps) {
 
       <button
           onClick={onBack}
-          className="mt-8 text-[var(--text-muted)] hover:text-[var(--brand-primary)] font-black uppercase tracking-[0.2em] text-[10px] transition-all duration-300 flex items-center gap-2"
+          className="mt-8 text-[var(--text-muted)] hover:text-[var(--brand-primary)] font-black uppercase tracking-[0.2em] text-[13px] transition-all duration-300 flex items-center gap-2"
       >
         <span>←</span> Back Home
       </button>

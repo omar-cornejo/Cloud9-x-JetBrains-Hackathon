@@ -236,6 +236,20 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const teamHighlightColor = currentAction.team === "blue" ? "var(--accent-blue)" : currentAction.team === "red" ? "var(--accent-red)" : "var(--brand-primary)";
   const teamHighlightShadow = currentAction.team === "blue" ? "rgba(0, 209, 255, 0.25)" : currentAction.team === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
 
+  // In live client-draft we want the UI accent for recommendations/confirm to match the Drafter's green accent,
+  // but slightly less bright than the primary neon.
+  const recommendationAccentColor = "var(--brand-soft)";
+  const recommendationAccentShadow = "rgba(0, 230, 118, 0.22)";
+
+  const isConfirmEnabled =
+    !!stagedChampion &&
+    stagedChampion.name !== "none" &&
+    currentAction.isMyTurn &&
+    currentAction.phase !== "PLANNING" &&
+    currentAction.phase !== "FINALIZATION";
+
+  const confirmAccentColor = recommendationAccentColor;
+
   const filteredChampions = useMemo(() => {
     const filtered = [...champions]
       .filter((champ) =>
@@ -537,7 +551,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   };
 
   const getConfirmButtonColor = () => {
-    return "text-[var(--bg-color)] brightness-110";
+    return "text-[var(--bg-color)]";
   };
 
   // Keep these returns AFTER all hooks to preserve hook order.
@@ -735,22 +749,28 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
             </div>
             <button
                 onClick={handleConfirm}
-                disabled={!stagedChampion || stagedChampion.name === "none" || !currentAction.isMyTurn || currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION"}
+                disabled={!isConfirmEnabled}
                 className={`w-full py-2.5 rounded-xl font-black uppercase tracking-[0.2em] transition-all transform active:scale-[0.98] text-sm border-2 ${
-                    stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn && currentAction.phase !== "PLANNING" && currentAction.phase !== "FINALIZATION"
+                    isConfirmEnabled
                         ? getConfirmButtonColor()
                         : "bg-[var(--surface-color)] border-[var(--border-color)] text-[var(--text-muted)] cursor-not-allowed opacity-40"
                 }`}
-                style={stagedChampion && stagedChampion.name !== "none" && currentAction.isMyTurn ? {
-                  backgroundColor: teamHighlightColor,
-                  borderColor: teamHighlightColor
+                style={isConfirmEnabled ? {
+                  backgroundColor: confirmAccentColor,
+                  borderColor: confirmAccentColor
                 } : {}}
             >
               {currentAction.phase === "PLANNING" || currentAction.phase === "FINALIZATION" ? "Awaiting Game" : getConfirmButtonText()}
             </button>
 
             {canShowRecommendations && (
-              <div className="flex-[1.8] border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl overflow-hidden relative shadow-md">
+              <div
+                className="flex-[1.8] border border-[var(--border-color)] bg-[var(--surface-color)] rounded-xl overflow-hidden relative shadow-md"
+                style={{
+                  '--team-accent': recommendationAccentColor,
+                  '--team-accent-shadow': recommendationAccentShadow
+                } as React.CSSProperties}
+              >
                 {selectedRec ? (
                   <div className="absolute inset-0 bg-[var(--bg-color)]/95 p-2 flex animate-in fade-in duration-300 z-20">
                     <div className="w-[110px] flex flex-col items-center gap-3 shrink-0 mt-3">
@@ -759,12 +779,12 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                           src={selectedRec.champ.icon}
                           alt={selectedRec.champ.name}
                           className="w-16 h-16 border-2 rounded-xl"
-                          style={{ borderColor: teamHighlightColor }}
+                          style={{ borderColor: recommendationAccentColor }}
                         />
                       ) : (
                         <div 
                           className="w-16 h-16 border-2 bg-[var(--surface-color)] rounded-xl"
-                          style={{ borderColor: teamHighlightColor }}
+                          style={{ borderColor: recommendationAccentColor }}
                         />
                       )}
                       <div className="flex flex-col gap-1 items-center text-center w-full">
@@ -773,7 +793,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                         </div>
                         <div 
                           className="text-xs font-black uppercase tracking-wider"
-                          style={{ color: teamHighlightColor }}
+                          style={{ color: recommendationAccentColor }}
                         >
                           {(selectedRec.rec.score * 100).toFixed(0)}%
                         </div>
