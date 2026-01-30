@@ -619,6 +619,140 @@ class TournamentDraft:
 
         return reasons
 
+    def _solo_q_synergy_bonus(self, champ_id: int, target_side: str) -> float:
+        """SoloQ-only bonus based on synergy with already-picked allies.
+
+        Returns an additive score delta that can be large enough to reshuffle the top picks
+        when allies change (roughly capped around +/-0.50).
+        """
+
+        if not self.synergy_map:
+            return 0.0
+
+        allies = self.blue_picks if target_side == "BLUE" else self.red_picks
+        if not allies:
+            return 0.0
+
+        diffs: List[float] = []
+        for ally_name in allies:
+            ally_id = self.name_to_id.get(str(ally_name).lower())
+            if not ally_id or ally_id == champ_id:
+                continue
+            wr = float(self.synergy_map.get((champ_id, ally_id), 0.5))
+            diffs.append(wr - 0.5)
+
+        if not diffs:
+            return 0.0
+
+        mean_diff = float(np.mean(diffs))
+        best_diff = float(np.max(diffs))
+        worst_diff = float(np.min(diffs))
+
+        # Use "best buddy" synergy heavily so that changing a single ally can
+        # strongly affect rankings (SOLOQ behavior).
+        mean_diff = max(-0.25, min(0.25, mean_diff))
+        best_diff = max(-0.25, min(0.25, best_diff))
+        worst_diff = max(-0.25, min(0.25, worst_diff))
+
+        bonus = (best_diff * 1.6) + (mean_diff * 0.6) + (worst_diff * 0.2)
+        return float(max(-0.50, min(0.50, bonus)))
+
+    def _solo_q_counter_bonus(self, champ_stats: Any, my_role: str, target_side: str) -> float:
+        """SoloQ-only bonus based on a simple lane counter heuristic.
+
+        We compare lane dominance + gold hunger against the enemy laner for the same role
+        (when identifiable). Returns an additive score delta that can be large enough to
+        reshuffle the top picks when enemies change (roughly capped around +/-0.45).
+        """
+
+        enemies = self.red_picks if target_side == "BLUE" else self.blue_picks
+        if not enemies:
+            return 0.0
+
+        enemy_roles = self._solve_roles(enemies)
+        role_to_enemy = {v: k for k, v in enemy_roles.items()}
+        enemy_laner = role_to_enemy.get(my_role)
+        if not enemy_laner:
+            return 0.0
+
+        enemy_id = self.name_to_id.get(str(enemy_laner).lower())
+        if not enemy_id:
+            return 0.0
+
+        enemy_row = self.df.filter(pl.col("champ_id") == enemy_id).mean()
+        if enemy_row.height == 0:
+            return 0.0
+
+        def val(key: str) -> float:
+            try:
+                if hasattr(champ_stats, "get"):
+                    v = champ_stats.get(key, 0)
+                else:
+                    v = champ_stats[key]
+                return float(v or 0)
+            except Exception:
+                return 0.0
+
+        my_prio = val("style_lane_dominance")
+        my_scale = val("style_gold_hunger")
+
+        en_prio = float(enemy_row["style_lane_dominance"][0] or 0)
+        en_scale = float(enemy_row["style_gold_hunger"][0] or 0)
+
+        lane_adv = my_prio - en_prio
+        scale_adv = my_scale - en_scale
+
+        lane_norm = max(-1.0, min(1.0, lane_adv / 6.0))
+        scale_norm = max(-1.0, min(1.0, scale_adv / 6.0))
+
+        # Continuous component.
+        bonus = (lane_norm * 0.14) + (scale_norm * 0.10)
+
+        # Discrete component (more "counter-like" and noticeable).
+        if lane_adv >= 2:
+            bonus += 0.18
+        elif lane_adv <= -2:
+            bonus -= 0.14
+
+        if scale_adv >= 2:
+            bonus += 0.12
+        elif scale_adv <= -2:
+            bonus -= 0.10
+
+        # If you have tempo AND they outscale, reward early snowball picks.
+        if lane_adv >= 1 and my_scale < en_scale:
+            bonus += 0.06
+
+        return float(max(-0.45, min(0.45, bonus)))
+
+    def _solo_q_popularity_bonus(self, games_played: float, pr: float) -> float:
+        """SoloQ-only bonus for champions that are played a lot.
+
+        The feature store provides per-role aggregated pick frequency via:
+        - games_played: absolute number of samples for this champ+role
+        - pr: share of games within that role slice
+
+        We want a noticeable but bounded lift for very common picks, because in SoloQ
+        comfort/availability matters even when raw winrate is only "decent".
+        """
+
+        try:
+            gp = float(games_played or 0.0)
+            pr = float(pr or 0.0)
+        except Exception:
+            return 0.0
+
+        # Normalize pick-rate (role-local) and absolute sample size with log scaling.
+        pr_norm = max(0.0, min(1.0, pr / 0.06))  # ~6%+ in-role is very common
+        gp_norm = max(0.0, min(1.0, np.log1p(gp) / np.log1p(4000.0)))
+
+        pop = (pr_norm * 0.70) + (gp_norm * 0.30)
+
+        # Shift so average-ish popularity is ~0; very popular picks get a lift.
+        bonus = (pop - 0.35) * 0.16
+
+        return float(max(-0.03, min(0.10, bonus)))
+
     # --- GAME STATE ---
     def configure_series(self, mode: str, total_games: int):
         modes = {"NORMAL": "NORMAL", "FEARLESS": "FEARLESS", "IRONMAN": "IRONMAN", "SOLOQ": "SOLOQ"}
@@ -768,7 +902,12 @@ class TournamentDraft:
             total_games = cands["games_played"].sum()
             cands = cands.filter(pl.col("games_played") > 100)
             cands = cands.with_columns((pl.col("games_played") / total_games).alias("pr")).filter(pl.col("pr") > 0.005)
-            cand_pd = cands.sort("stat_winrate", descending=True).limit(150).to_pandas()
+            if self.series_config["mode"] == "SOLOQ":
+                # In SoloQ, widen the pool and prioritize popular champs so high-playrate
+                # "comfort" picks can compete even if winrate isn't top-1.
+                cand_pd = cands.sort(["pr", "stat_winrate"], descending=True).limit(250).to_pandas()
+            else:
+                cand_pd = cands.sort("stat_winrate", descending=True).limit(150).to_pandas()
 
             for _, row in cand_pd.iterrows():
                 c_name = self.id_to_name.get(row["champ_id"])
@@ -777,16 +916,42 @@ class TournamentDraft:
 
                 display_name = self.id_to_display_name.get(int(row["champ_id"]), c_name)
                 base_score = row["stat_winrate"]
-                pro_bonus, pro_note, pro_games = self.get_pro_bias(p_name, display_name)
-                meta_bonus, meta_note = self.get_tournament_bias(c_name)
+                pro_bonus, pro_note, pro_games = 0.0, "", 0
+                meta_bonus, meta_note = 0.0, ""
+                soloq_syn_bonus = 0.0
+                soloq_counter_bonus = 0.0
+                soloq_pop_bonus = 0.0
 
-                # If SOLOQ mode, we skip pro/tournament biases
-                if self.series_config["mode"] == "SOLOQ":
-                    pro_bonus, meta_bonus = 0.0, 0.0
-                    pro_note, meta_note = "", ""
+                if self.series_config["mode"] != "SOLOQ":
+                    pro_bonus, pro_note, pro_games = self.get_pro_bias(p_name, display_name)
+                    meta_bonus, meta_note = self.get_tournament_bias(c_name)
+                    final_score = base_score + pro_bonus + meta_bonus
+                    final_score = min(1.0, float(final_score))
+                else:
+                    # SoloQ scoring: emphasize ally synergy + lane countering.
+                    raw_syn = self._solo_q_synergy_bonus(int(row["champ_id"]), target_side)
+                    raw_counter = self._solo_q_counter_bonus(row, role, target_side)
+                    soloq_pop_bonus = self._solo_q_popularity_bonus(float(row.get("games_played", 0)), float(row.get("pr", 0)))
 
-                final_score = base_score + pro_bonus + meta_bonus
-                final_score = min(1.0, final_score)
+                    # Make counters heavier; slightly reduce other factors.
+                    soloq_syn_bonus = raw_syn * 0.80
+                    soloq_counter_bonus = max(-0.65, min(0.70, raw_counter * 2.0))
+
+                    # Further compress raw stat winrate so matchups/counters can drive changes.
+                    base_component = 0.5 + (float(base_score) - 0.5) * 0.25
+
+
+                    raw_score = float(base_component + soloq_syn_bonus + soloq_counter_bonus + soloq_pop_bonus)
+                    if raw_score <= 0.0:
+                        final_score = 0.0
+                    elif raw_score < 1.0:
+                        final_score = raw_score
+                    else:
+                        cap_low = 0.985
+                        alpha = 1.6
+                        over = raw_score - 1.0
+                        final_score = 1.0 - (1.0 - cap_low) * float(np.exp(-alpha * over))
+                    final_score = max(0.0, min(1.0, float(final_score)))
 
                 tactical_note = self.get_tactical_analysis(int(row["champ_id"]), row, role, target_side)
 
@@ -797,6 +962,13 @@ class TournamentDraft:
                     parts.append(f"{display_name} is best for {p_name}")
                 if meta_note:
                     parts.append(meta_note)
+                if self.series_config["mode"] == "SOLOQ":
+                    if abs(soloq_syn_bonus) >= 0.012:
+                        parts.append(f"SoloQ synergy impact: {soloq_syn_bonus:+.1%}")
+                    if abs(soloq_counter_bonus) >= 0.012:
+                        parts.append(f"SoloQ counter impact: {soloq_counter_bonus:+.1%}")
+                    if abs(soloq_pop_bonus) >= 0.012:
+                        parts.append(f"SoloQ popularity impact: {soloq_pop_bonus:+.1%}")
                 if tactical_note:
                     parts.extend(tactical_note)
                 elif row["stat_winrate"] > 0.52:
@@ -811,6 +983,13 @@ class TournamentDraft:
                     tags.append("P")
                 if meta_bonus > 0:
                     tags.append("T")
+                if self.series_config["mode"] == "SOLOQ":
+                    if soloq_syn_bonus > 0.0:
+                        tags.append("S")
+                    if soloq_counter_bonus > 0.0:
+                        tags.append("C")
+                    if soloq_pop_bonus > 0.0:
+                        tags.append("R")
 
                 threat = ""
                 if is_ban_mode:
@@ -860,6 +1039,11 @@ class TournamentDraft:
             "mode": self.series_config["mode"],
             "game": self.series_config["current_game"],
             "total_games": self.series_config["total_games"],
+            "debug_state": {
+                "blue_picks": self.blue_picks,
+                "red_picks": self.red_picks,
+                "bans": self.bans,
+            },
             "teams": {
                 "BLUE": {"name": self.teams["BLUE"]["name"], "players": self.teams["BLUE"]["players"]},
                 "RED": {"name": self.teams["RED"]["name"], "players": self.teams["RED"]["players"]},

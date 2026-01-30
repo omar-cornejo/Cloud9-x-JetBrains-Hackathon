@@ -320,6 +320,24 @@ fn ml_suggest(
     )
 }
 
+#[tauri::command]
+fn ml_sync_state(
+    state: tauri::State<MlState>,
+    bluePicks: Vec<String>,
+    redPicks: Vec<String>,
+    bans: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    ml_send(
+        &state,
+        "sync_state",
+        json!({
+            "blue_picks": bluePicks,
+            "red_picks": redPicks,
+            "bans": bans
+        }),
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -355,7 +373,8 @@ pub fn run() {
             ml_pick,
             ml_ban,
             ml_next_game,
-            ml_suggest
+            ml_suggest,
+            ml_sync_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

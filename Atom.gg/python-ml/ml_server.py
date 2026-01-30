@@ -139,6 +139,33 @@ class MlServer:
                     "payload": {"side": side, "champion": champ, "blue_winrate": wr["blue"], "red_winrate": wr["red"]},
                 }
 
+            if msg_type == "sync_state":
+                blue_picks = msg.get("blue_picks") or []
+                red_picks = msg.get("red_picks") or []
+                bans = msg.get("bans") or []
+                self.app.reset_game_board()
+
+                for c in bans:
+                    self.app.add_ban(str(c))
+                for c in blue_picks:
+                    self.app.add_pick("BLUE", str(c))
+                for c in red_picks:
+                    self.app.add_pick("RED", str(c))
+
+                wr = self.app.predict_live_winrate()
+                return {
+                    "request_id": request_id,
+                    "ok": True,
+                    "type": "sync_state_result",
+                    "payload": {
+                        "blue_picks": self.app.blue_picks,
+                        "red_picks": self.app.red_picks,
+                        "bans": self.app.bans,
+                        "blue_winrate": wr["blue"],
+                        "red_winrate": wr["red"],
+                    },
+                }
+
             if msg_type == "next_game":
                 self.app.end_game()
                 wr = self.app.predict_live_winrate()

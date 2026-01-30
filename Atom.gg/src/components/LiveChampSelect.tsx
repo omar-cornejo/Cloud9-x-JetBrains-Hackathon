@@ -61,7 +61,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [mlSyncTick, setMlSyncTick] = useState(0);
   const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
 
-  const sentActionKeysRef = useRef<Set<string>>(new Set());
+  const lastSyncedStateRef = useRef<string>("");
 
   const championsMap = useMemo(() => {
     const map = new Map<number, Champion>();
@@ -269,7 +269,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       .then(() => {
         setMlReady(true);
         setMlError(null);
-        sentActionKeysRef.current = new Set();
+        lastSyncedStateRef.current = "";
         setMlSyncTick((t) => t + 1);
       })
       .catch((err) => {
@@ -357,73 +357,73 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
   }, [currentAction.type]);
 
-  // Sync completed actions (picks/bans) from the live match into ML.
+  // Sync a full snapshot (picks + bans) from champ-select into ML.
+  // This is more reliable than only syncing completed actions because the LCU
+  // can expose championIds without a completed pick action (hover/intent/preview).
   useEffect(() => {
     if (!mlReady) return;
     if (!session) return;
     if (championsMap.size === 0) return;
 
+    const myTeam = session.myTeam || [];
+    const theirTeam = session.theirTeam || [];
     const actions = session.actions || [];
-    const myTeamCellIds = new Set<number>((session.myTeam || []).map((p: any) => p.cellId));
 
-    const completed: any[] = [];
+    const bluePickKeys: string[] = [];
+    const redPickKeys: string[] = [];
+    const banKeys: string[] = [];
+
+    const seenBlue = new Set<string>();
+    const seenRed = new Set<string>();
+    const seenBans = new Set<string>();
+
+    for (const p of myTeam) {
+      const champId = Number(p?.championId ?? 0);
+      if (!champId || champId <= 0) continue;
+      const champ = championsMap.get(champId);
+      const key = champ?.id;
+      if (!key || key === "none") continue;
+      if (seenBlue.has(key)) continue;
+      seenBlue.add(key);
+      bluePickKeys.push(key);
+    }
+
+    for (const p of theirTeam) {
+      const champId = Number(p?.championId ?? 0);
+      if (!champId || champId <= 0) continue;
+      const champ = championsMap.get(champId);
+      const key = champ?.id;
+      if (!key || key === "none") continue;
+      if (seenRed.has(key)) continue;
+      seenRed.add(key);
+      redPickKeys.push(key);
+    }
+
     for (const group of actions) {
       if (!Array.isArray(group)) continue;
-      for (const action of group) {
-        if (!action || !action.completed) continue;
-        if (action.championId == null || action.championId <= 0) continue;
-        if (action.type !== "pick" && action.type !== "ban") continue;
-        completed.push(action);
+      for (const a of group) {
+        if (!a || a.type !== "ban" || !a.completed) continue;
+        const champId = Number(a?.championId ?? 0);
+        if (!champId || champId <= 0) continue;
+        const champ = championsMap.get(champId);
+        const key = champ?.id;
+        if (!key || key === "none") continue;
+        if (seenBans.has(key)) continue;
+        seenBans.add(key);
+        banKeys.push(key);
       }
     }
 
-    completed.sort((a, b) => {
-      const ai = typeof a.id === "number" ? a.id : 0;
-      const bi = typeof b.id === "number" ? b.id : 0;
-      return ai - bi;
-    });
+    const signature = JSON.stringify({ bluePickKeys, redPickKeys, banKeys });
+    if (signature === lastSyncedStateRef.current) return;
+    lastSyncedStateRef.current = signature;
 
-    let cancelled = false;
-    (async () => {
-      let sentAny = false;
-
-      for (const action of completed) {
-        if (cancelled) return;
-
-        const key = action.id != null ? String(action.id) : `${action.type}:${action.actorCellId}:${action.championId}`;
-        if (sentActionKeysRef.current.has(key)) continue;
-
-        const champ = championsMap.get(action.championId);
-        const championKey = champ?.id;
-        if (!championKey || championKey === "none") {
-          sentActionKeysRef.current.add(key);
-          continue;
-        }
-
-        try {
-          if (action.type === "ban") {
-            await invoke("ml_ban", { champion: championKey });
-          } else {
-            const side = myTeamCellIds.has(action.actorCellId) ? "blue" : "red";
-            await invoke("ml_pick", { side, champion: championKey });
-          }
-          sentActionKeysRef.current.add(key);
-          sentAny = true;
-        } catch (err) {
-          console.error("Failed to sync ML action:", err);
-          setMlError("Failed to send draft actions to ML");
-          return;
-        }
-      }
-
-      if (sentAny) {
-        setMlSyncTick((t) => t + 1);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    invoke("ml_sync_state", { bluePicks: bluePickKeys, redPicks: redPickKeys, bans: banKeys })
+      .then(() => setMlSyncTick((t) => t + 1))
+      .catch((err) => {
+        console.error("Failed to sync ML snapshot:", err);
+        setMlError("Failed to sync champ-select state to ML");
+      });
   }, [mlReady, session, championsMap]);
 
   // Only fetch/display recs when it's your pick turn.

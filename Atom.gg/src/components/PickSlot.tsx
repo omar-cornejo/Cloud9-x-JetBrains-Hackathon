@@ -13,7 +13,7 @@ interface PickSlotProps {
   animationDuration?: string;
 }
 
-export function PickSlot({ pick, ban, index, team, playerName, isActive, isLowTime, onClick, isSwapSource, animationDuration }: PickSlotProps) {
+export function PickSlot({ pick, ban, index: _index, team, playerName, isActive, isLowTime, onClick, isSwapSource, animationDuration }: PickSlotProps) {
   const isBlue = team === "blue";
   const borderClass = isBlue ? "border-l-[var(--accent-blue)] border-l-[6px]" : "border-r-[var(--accent-red)] border-r-[6px]";
   const pulseClass = isLowTime
@@ -23,7 +23,7 @@ export function PickSlot({ pick, ban, index, team, playerName, isActive, isLowTi
   return (
       <div
           onClick={onClick}
-          className={`pick-slot h-[80px] lg:h-[95px] border-2 bg-[var(--surface-color)] flex items-center ${borderClass} relative group transition-all duration-300 ${
+          className={`pick-slot h-[95px] lg:h-[120px] border-2 bg-[var(--surface-color)] flex items-center ${borderClass} relative group transition-all duration-300 ${
               isActive ? `${pulseClass} z-20` : "border-[var(--border-color)] hover:border-[var(--text-muted)]"
           } ${isSwapSource ? "border-yellow-400 scale-[1.03] z-30 shadow-lg" : ""} ${onClick ? "cursor-pointer" : ""}`}
           style={isActive && animationDuration ? { animationDuration } : {}}
