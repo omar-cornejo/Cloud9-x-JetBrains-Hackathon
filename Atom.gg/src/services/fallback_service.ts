@@ -116,7 +116,7 @@ export function getFallbackRoleIcon(role: string): string {
 }
 
 export function getRoleIconSync(role: string): string {
-    if (positionIconFallback) {
+    if (positionIconFallback || !navigator.onLine) {
         return getFallbackRoleIcon(role);
     }
 
@@ -144,20 +144,36 @@ export function getChampionSplash(id: string): string {
 }
 
 export async function initializeIconSource(): Promise<void> {
-    try {
-        const testUrl = getRoleIcon("TOP");
-        const response = await fetch(testUrl, { method: 'HEAD' });
-        positionIconFallback = !response.ok;
-    } catch (error) {
-        positionIconFallback = true;
-    }
+    const checkConnectivity = async (url: string): Promise<boolean> => {
+        if (!navigator.onLine) return false;
+        try {
+            await fetch(url, {
+                method: 'HEAD', 
+                mode: 'no-cors',
+                cache: 'no-store' 
+            });
+            return true;
+        } catch (error) {
+            return false;
+        }
+    };
 
-    try {
-        const testUrl = `https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/Aatrox.png`;
-        const response = await fetch(testUrl, { method: 'HEAD' });
-        championAssetFallback = !response.ok;
-    } catch (error) {
-        championAssetFallback = true;
+    const positionUrl = getRoleIcon("TOP");
+    const championUrl = `https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/Aatrox.png`;
+
+    const [canReachPositions, canReachChampions] = await Promise.all([
+        checkConnectivity(positionUrl),
+        checkConnectivity(championUrl)
+    ]);
+
+    positionIconFallback = !canReachPositions;
+    championAssetFallback = !canReachChampions;
+
+    if (positionIconFallback) {
+        console.log("Fallback activated for position icons (Local assets)");
+    }
+    if (championAssetFallback) {
+        console.log("Fallback activated for champion assets (Local assets)");
     }
 }
 
