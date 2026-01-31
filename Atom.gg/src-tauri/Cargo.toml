@@ -1,0 +1,30 @@
+[package]
+name = "atomgg"
+version = "0.1.0"
+description = "A Tauri App for Cloud9-x-JetBrains-Hackathon"
+authors = ["Omar, Andres, Didac & Rubén"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "atomgg_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+rusqlite = { version = "0.30", features = ["bundled"] }
+sysinfo = "0.29"
+base64 = "0.21"
+rand = "0.9.2"
