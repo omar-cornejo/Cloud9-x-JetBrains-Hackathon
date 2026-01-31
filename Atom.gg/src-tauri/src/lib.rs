@@ -39,7 +39,8 @@ impl MlProcess {
             .join("dist")
             .join(ml_server_name);
 
-        let db_path = resource_dir.join("esports_data.db");
+        let db_path = resource_dir.join("src").join("esports_data.db");
+        let db_path_env = db_path.clone();
 
         // Verify files exist
         if !ml_server_path.exists() {
@@ -218,9 +219,22 @@ pub struct TeamPlayers {
 }
 
 #[tauri::command]
-fn get_team_players(team_name: String) -> Result<TeamPlayers, String> {
-    let db_path = "src/esports_data.db";
-    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+fn get_team_players(app_handle: tauri::AppHandle, team_name: String) -> Result<TeamPlayers, String> {
+    let resource_db = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {}", e))?
+        .join("src")
+        .join("esports_data.db");
+    
+    let db_path = if resource_db.exists() {
+        resource_db
+    } else {
+        std::path::PathBuf::from("src/esports_data.db")
+    };
+
+    let conn = rusqlite::Connection::open(&db_path)
+        .map_err(|e| format!("Failed to open database at {}: {}", db_path.display(), e))?;
 
     let views = ["view_lck", "view_lpl", "view_lcs", "view_lec"];
 

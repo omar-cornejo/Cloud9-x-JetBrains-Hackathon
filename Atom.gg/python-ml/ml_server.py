@@ -24,41 +24,35 @@ class MlServer:
         # CWD is expected to be python-ml
         quiet = True
 
-        model_file = os.environ.get("ATOMGG_MODEL_FILE")
-        if not model_file:
-            model_file = get_resource_path("draft_oracle_brain_v12_final.json")
+        self.required_files = {
+            "model": os.environ.get("ATOMGG_MODEL_FILE") or get_resource_path("draft_oracle_brain_v12_final.json"),
+            "features": os.environ.get("ATOMGG_FEATURE_FILE") or get_resource_path("draft_oracle_feature_store.parquet"),
+            "pro_signatures": os.environ.get("ATOMGG_PRO_SIG_FILE") or get_resource_path("draft_oracle_pro_signatures.parquet"),
+            "tournament_meta": os.environ.get("ATOMGG_TOURNAMENT_META_FILE") or get_resource_path("draft_oracle_tournament_meta.parquet"),
+            "synergy": os.environ.get("ATOMGG_SYNERGY_FILE") or get_resource_path("draft_oracle_synergy_matrix.parquet"),
+        }
 
-        feature_file = os.environ.get("ATOMGG_FEATURE_FILE")
-        if not feature_file:
-            feature_file = get_resource_path("draft_oracle_feature_store.parquet")
-
-        pro_sig_file = os.environ.get("ATOMGG_PRO_SIG_FILE")
-        if not pro_sig_file:
-            pro_sig_file = get_resource_path("draft_oracle_pro_signatures.parquet")
-
-        tournament_meta_file = os.environ.get("ATOMGG_TOURNAMENT_META_FILE")
-        if not tournament_meta_file:
-            tournament_meta_file = get_resource_path("draft_oracle_tournament_meta.parquet")
-
-        synergy_file = os.environ.get("ATOMGG_SYNERGY_FILE")
-        if not synergy_file:
-            synergy_file = get_resource_path("draft_oracle_synergy_matrix.parquet")
-
-        # Database is passed via environment variable from Rust
         db_file = os.environ.get("ATOMGG_DB_FILE")
         if not db_file:
-            if getattr(sys, 'frozen', False):
-                db_file = get_resource_path("esports_data.db")
-            else:
-                db_file = os.path.join("..", "src-tauri", "src", "esports_data.db")
+            db_file = get_resource_path("esports_data.db")
+            if not os.path.exists(db_file):
+                # Try the 'src' subdirectory (Tauri resource mapping)
+                db_file_in_src = get_resource_path(os.path.join("src", "esports_data.db"))
+                if os.path.exists(db_file_in_src):
+                    db_file = db_file_in_src
+                else:
+                    # Fallback for dev if not found in bundle/python-ml dir
+                    db_file = os.path.join("..", "src-tauri", "src", "esports_data.db")
+
+        self.required_files["database"] = db_file
 
         self.app = TournamentDraft(
-            model_file=model_file,
-            feature_file=feature_file,
-            pro_sig_file=pro_sig_file,
-            tournament_meta_file=tournament_meta_file,
-            synergy_file=synergy_file,
-            db_file=db_file,
+            model_file=self.required_files["model"],
+            feature_file=self.required_files["features"],
+            pro_sig_file=self.required_files["pro_signatures"],
+            tournament_meta_file=self.required_files["tournament_meta"],
+            synergy_file=self.required_files["synergy"],
+            db_file=self.required_files["database"],
             quiet=quiet,
         )
 

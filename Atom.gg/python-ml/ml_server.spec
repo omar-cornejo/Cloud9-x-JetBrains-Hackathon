@@ -13,6 +13,7 @@ datas = [
     ('draft_oracle_tournament_meta.parquet', '.'),
     ('draft_oracle_synergy_matrix.parquet', '.'),
     ('model_features_v12.json','.'),
+    ('../src-tauri/src/esports_data.db', '.'),
 ]
 
 datas += xb_datas
@@ -58,7 +59,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
