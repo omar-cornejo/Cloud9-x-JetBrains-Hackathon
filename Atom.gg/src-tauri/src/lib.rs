@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
 use tauri::Manager;
@@ -11,7 +10,7 @@ use tauri::Manager;
 mod lcu;
 mod lcu_utils;
 
-const DDRAGON_VERSION: &str = "16.2.1";
+const DDRAGON_VERSION: &str = "16.1.1";
 
 struct MlProcess {
     child: Child,
@@ -20,26 +19,57 @@ struct MlProcess {
 }
 
 impl MlProcess {
-    fn start(python_ml_dir: &Path, db_path: &Path) -> Result<Self, String> {
-        let venv_python = python_ml_dir.join(".venv").join("Scripts").join("python.exe");
-        let python = if venv_python.exists() {
-            venv_python
-        } else {
-            PathBuf::from("python")
-        };
+    fn start(app_handle: &tauri::AppHandle) -> Result<Self, String> {
+        let resource_dir = app_handle
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource directory: {}", e))?;
 
-        let mut cmd = Command::new(python);
-        cmd.current_dir(python_ml_dir)
-            .arg("-u")
-            .arg("ml_server.py")
-            .stdin(Stdio::piped())
+        // Determine the ML server executable name based on platform
+        #[cfg(target_os = "windows")]
+        let ml_server_name = "ml_server.exe";
+
+        #[cfg(not(target_os = "windows"))]
+        let ml_server_name = "ml_server";
+
+        // The bundled file is in _up_/python-ml/dist/ subdirectory
+        let ml_server_path = resource_dir
+            .join("_up_")
+            .join("python-ml")
+            .join("dist")
+            .join(ml_server_name);
+
+        let db_path = resource_dir.join("esports_data.db");
+
+        // Verify files exist
+        if !ml_server_path.exists() {
+            return Err(format!(
+                "ML server executable not found at: {}",
+                ml_server_path.display()
+            ));
+        }
+
+        if !db_path.exists() {
+            eprintln!("Warning: Database not found at: {}", db_path.display());
+        }
+
+        eprintln!("Starting ML server from: {}", ml_server_path.display());
+        eprintln!("Using database: {}", db_path.display());
+
+        // Spawn the ML server process
+        let mut cmd = Command::new(&ml_server_path);
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .env("ATOMGG_DB_FILE", db_path);
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn ML server: {e}"))?;
+        let mut child = cmd.spawn()
+            .map_err(|e| format!("Failed to spawn ML server: {}", e))?;
+
         let stdin = child.stdin.take().ok_or("Failed to open ML stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to open ML stdout")?;
+
+        eprintln!("ML server started successfully with PID: {}", child.id());
 
         Ok(Self {
             child,
@@ -84,93 +114,24 @@ impl MlState {
     }
 }
 
-fn find_python_ml_dir() -> Result<PathBuf, String> {
-    let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
-    for _ in 0..8 {
-        let candidate = dir.join("python-ml").join("ml_server.py");
-        if candidate.exists() {
-            return Ok(dir.join("python-ml"));
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-    Err("Could not locate python-ml/ml_server.py from current working directory".to_string())
-}
-
-fn find_db_path(python_ml_dir: &Path) -> PathBuf {
-    // default used by ml_server.py as well
-    python_ml_dir
-        .join("..")
-        .join("src-tauri")
-        .join("src")
-        .join("esports_data.db")
-}
-
-fn find_public_dir() -> Result<PathBuf, String> {
-    let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
-    for _ in 0..8 {
-        let candidate = dir.join("public").join("dragontail-16.2.1");
-        if candidate.exists() {
-            return Ok(dir.join("public"));
-        }
-        if let Some(parent) = dir.parent() {
-            dir = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-    Err("Could not locate public/dragontail-16.2.1 directory".to_string())
-}
-
-fn load_local_champion_json() -> Result<DDragonResponse, String> {
-    let public_dir = find_public_dir()?;
-    let path = public_dir
-        .join("dragontail-16.2.1")
-        .join(DDRAGON_VERSION)
-        .join("data")
-        .join("en_US")
-        .join("champion.json");
-    
-    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read local champion.json: {}", e))?;
-    serde_json::from_str(&content).map_err(|e| format!("Failed to parse local champion.json: {}", e))
-}
-
-fn load_local_champions() -> Result<Vec<ChampionShort>, String> {
-    let response = load_local_champion_json()?;
-    let champions = response.data
-        .into_values()
-        .map(|champ| {
-            let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
-            ChampionShort {
-                name: champ.name.clone(),
-                id: champ.id.clone(),
-                numeric_id,
-                icon: format!("/dragontail-16.2.1/{}/img/champion/{}.png", DDRAGON_VERSION, champ.id),
-                splash: format!("/dragontail-16.2.1/img/champion/splash/{}_0.jpg", champ.id),
-            }
-        })
-        .collect();
-    Ok(champions)
-}
-
-fn ml_ensure_started(state: &tauri::State<MlState>) -> Result<(), String> {
+fn ml_ensure_started(state: &tauri::State<MlState>, app_handle: &tauri::AppHandle) -> Result<(), String> {
     let mut guard = state.process.lock().map_err(|_| "ML state poisoned".to_string())?;
     if guard.is_some() {
         return Ok(());
     }
 
-    let python_ml_dir = find_python_ml_dir()?;
-    let db_path = find_db_path(&python_ml_dir);
-    let proc = MlProcess::start(&python_ml_dir, &db_path)?;
+    let proc = MlProcess::start(app_handle)?;
     *guard = Some(proc);
     Ok(())
 }
 
-fn ml_send(state: &tauri::State<MlState>, msg_type: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
-    ml_ensure_started(state)?;
+fn ml_send(
+    state: &tauri::State<MlState>,
+    app_handle: &tauri::AppHandle,
+    msg_type: &str,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ml_ensure_started(state, app_handle)?;
 
     let request_id = state.next_id.fetch_add(1, Ordering::Relaxed);
 
@@ -212,40 +173,38 @@ struct ChampionData {
 async fn get_all_champions() -> Result<Vec<ChampionShort>, String> {
     let url = format!("https://ddragon.leagueoflegends.com/cdn/{}/data/en_US/champion.json", DDRAGON_VERSION);
 
-    match reqwest::get(url).await {
-        Ok(resp) => {
-            if let Ok(response) = resp.json::<DDragonResponse>().await {
-                let champions = response.data
-                    .into_values()
-                    .map(|champ| {
-                        let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
-                        ChampionShort {
-                            name: champ.name.clone(),
-                            id: champ.id.clone(),
-                            numeric_id,
-                            icon: get_champion_icon(champ.id.clone()),
-                            splash: get_champion_splash(champ.id),
-                        }
-                    })
-                    .collect();
-                return Ok(champions);
-            }
-        }
-        Err(_) => {}
-    }
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| e.to_string())?
+        .json::<DDragonResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    // Fallback if network fails or JSON parsing fails
-    load_local_champions()
+    let champions = response.data
+        .into_values()
+        .map(|champ| {
+            let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
+            ChampionShort {
+                name: champ.name.clone(),
+                id: champ.id.clone(),
+                numeric_id,
+                icon: get_champion_icon(champ.id.clone()),
+                splash: get_champion_splash(champ.id),
+            }
+        })
+        .collect();
+
+    Ok(champions)
 }
 
 #[tauri::command]
 fn get_champion_icon(id: String) -> String {
-    format!("https://ddragon.leagueoflegends.com/cdn/{}/img/champion/{}.png", DDRAGON_VERSION, id)
+    format!("https://cdn.communitydragon.org/latest/champion/{}/square", id)
 }
 
 #[tauri::command]
 fn get_champion_splash(id: String) -> String {
-    format!("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{}_0.jpg", id)
+    format!("https://cdn.communitydragon.org/latest/champion/{}/splash-art", id)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -296,7 +255,11 @@ struct MlInitConfig {
 }
 
 #[tauri::command]
-fn ml_init(state: tauri::State<MlState>, config: MlInitConfig) -> Result<serde_json::Value, String> {
+fn ml_init(
+    state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
+    config: MlInitConfig,
+) -> Result<serde_json::Value, String> {
     let blue_team = if config.is_team1_blue {
         config.team1.clone()
     } else {
@@ -310,6 +273,7 @@ fn ml_init(state: tauri::State<MlState>, config: MlInitConfig) -> Result<serde_j
 
     ml_send(
         &state,
+        &app_handle,
         "init",
         json!({
             "config": {
@@ -323,36 +287,54 @@ fn ml_init(state: tauri::State<MlState>, config: MlInitConfig) -> Result<serde_j
 }
 
 #[tauri::command]
-fn ml_set_sides(state: tauri::State<MlState>, blueTeam: String, redTeam: String) -> Result<serde_json::Value, String> {
+fn ml_set_sides(
+    state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
+    blueTeam: String,
+    redTeam: String,
+) -> Result<serde_json::Value, String> {
     // Update team names without resetting series/history.
-    let _ = ml_send(&state, "set_team", json!({"side": "BLUE", "name": blueTeam.clone()}))?;
-    let _ = ml_send(&state, "set_team", json!({"side": "RED", "name": redTeam.clone()}))?;
+    let _ = ml_send(&state, &app_handle, "set_team", json!({"side": "BLUE", "name": blueTeam.clone()}))?;
+    let _ = ml_send(&state, &app_handle, "set_team", json!({"side": "RED", "name": redTeam.clone()}))?;
     // Reload rosters (keeps existing SQL logic)
-    let _ = ml_send(&state, "roster", json!({"side": "BLUE", "team": blueTeam}))?;
-    let res = ml_send(&state, "roster", json!({"side": "RED", "team": redTeam}))?;
+    let _ = ml_send(&state, &app_handle, "roster", json!({"side": "BLUE", "team": blueTeam}))?;
+    let res = ml_send(&state, &app_handle, "roster", json!({"side": "RED", "team": redTeam}))?;
     Ok(res)
 }
 
 #[tauri::command]
-fn ml_pick(state: tauri::State<MlState>, side: String, champion: String) -> Result<serde_json::Value, String> {
+fn ml_pick(
+    state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
+    side: String,
+    champion: String,
+) -> Result<serde_json::Value, String> {
     let side = side.to_uppercase();
     let side = if side.starts_with('B') { "BLUE" } else { "RED" };
-    ml_send(&state, "pick", json!({"side": side, "champion": champion}))
+    ml_send(&state, &app_handle, "pick", json!({"side": side, "champion": champion}))
 }
 
 #[tauri::command]
-fn ml_ban(state: tauri::State<MlState>, champion: String) -> Result<serde_json::Value, String> {
-    ml_send(&state, "ban", json!({"champion": champion}))
+fn ml_ban(
+    state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
+    champion: String,
+) -> Result<serde_json::Value, String> {
+    ml_send(&state, &app_handle, "ban", json!({"champion": champion}))
 }
 
 #[tauri::command]
-fn ml_next_game(state: tauri::State<MlState>) -> Result<serde_json::Value, String> {
-    ml_send(&state, "next_game", json!({}))
+fn ml_next_game(
+    state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    ml_send(&state, &app_handle, "next_game", json!({}))
 }
 
 #[tauri::command]
 fn ml_suggest(
     state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
     targetSide: String,
     isBanMode: bool,
     roles: Option<Vec<String>>,
@@ -360,6 +342,7 @@ fn ml_suggest(
     let target_side = targetSide.to_uppercase();
     ml_send(
         &state,
+        &app_handle,
         "suggest",
         json!({
             "target_side": target_side,
@@ -372,12 +355,14 @@ fn ml_suggest(
 #[tauri::command]
 fn ml_sync_state(
     state: tauri::State<MlState>,
+    app_handle: tauri::AppHandle,
     bluePicks: Vec<String>,
     redPicks: Vec<String>,
     bans: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     ml_send(
         &state,
+        &app_handle,
         "sync_state",
         json!({
             "blue_picks": bluePicks,
@@ -397,15 +382,15 @@ pub fn run() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let state = handle.state::<MlState>();
-                if let Err(e) = ml_ensure_started(&state) {
+                if let Err(e) = ml_ensure_started(&state, &handle) {
                     eprintln!("Failed to start ML process at startup: {e}");
                 }
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_all_champions, 
-            get_champion_icon, 
+            get_all_champions,
+            get_champion_icon,
             get_champion_splash,
             get_team_players,
             lcu::get_current_summoner,
@@ -416,7 +401,6 @@ pub fn run() {
             lcu::lock_ban,
             lcu::is_lcu_available,
             lcu::get_champ_select_session,
-            get_team_players,
             ml_init,
             ml_set_sides,
             ml_pick,
@@ -497,17 +481,18 @@ mod tests {
         let response: DDragonResponse = serde_json::from_str(json_data).unwrap();
         assert!(response.data.contains_key("Aatrox"));
         let aatrox_data = &response.data["Aatrox"];
-        
+
+        let numeric_id = aatrox_data.key.parse::<i32>().unwrap_or(0);
         let aatrox = ChampionShort {
             name: aatrox_data.name.clone(),
             id: aatrox_data.id.clone(),
+            numeric_id,
             icon: get_champion_icon(aatrox_data.id.clone()),
             splash: get_champion_splash(aatrox_data.id.clone()),
         };
 
         assert_eq!(aatrox.name, "Aatrox");
         assert_eq!(aatrox.id, "Aatrox");
-        assert_eq!(aatrox.icon, format!("https://ddragon.leagueoflegends.com/cdn/{}/img/champion/Aatrox.png", DDRAGON_VERSION));
-        assert_eq!(aatrox.splash, "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg");
+        assert_eq!(aatrox.numeric_id, 266);
     }
 }

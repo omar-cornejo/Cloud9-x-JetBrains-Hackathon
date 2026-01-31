@@ -9,18 +9,48 @@ from draft_oracle import TournamentDraft
 def _eprint(*args: Any, **kwargs: Any) -> None:
     print(*args, file=sys.stderr, **kwargs)
 
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and PyInstaller."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        #if PyInstaller bundle
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+
+    return os.path.join(base_path, relative_path)
 
 class MlServer:
     def __init__(self):
         # CWD is expected to be python-ml
         quiet = True
 
-        model_file = os.environ.get("ATOMGG_MODEL_FILE", "draft_oracle_brain_v12_final.json")
-        feature_file = os.environ.get("ATOMGG_FEATURE_FILE", "draft_oracle_feature_store.parquet")
-        pro_sig_file = os.environ.get("ATOMGG_PRO_SIG_FILE", "draft_oracle_pro_signatures.parquet")
-        tournament_meta_file = os.environ.get("ATOMGG_TOURNAMENT_META_FILE", "draft_oracle_tournament_meta.parquet")
-        synergy_file = os.environ.get("ATOMGG_SYNERGY_FILE", "draft_oracle_synergy_matrix.parquet")
-        db_file = os.environ.get("ATOMGG_DB_FILE", os.path.join("..", "src-tauri", "src", "esports_data.db"))
+        model_file = os.environ.get("ATOMGG_MODEL_FILE")
+        if not model_file:
+            model_file = get_resource_path("draft_oracle_brain_v12_final.json")
+
+        feature_file = os.environ.get("ATOMGG_FEATURE_FILE")
+        if not feature_file:
+            feature_file = get_resource_path("draft_oracle_feature_store.parquet")
+
+        pro_sig_file = os.environ.get("ATOMGG_PRO_SIG_FILE")
+        if not pro_sig_file:
+            pro_sig_file = get_resource_path("draft_oracle_pro_signatures.parquet")
+
+        tournament_meta_file = os.environ.get("ATOMGG_TOURNAMENT_META_FILE")
+        if not tournament_meta_file:
+            tournament_meta_file = get_resource_path("draft_oracle_tournament_meta.parquet")
+
+        synergy_file = os.environ.get("ATOMGG_SYNERGY_FILE")
+        if not synergy_file:
+            synergy_file = get_resource_path("draft_oracle_synergy_matrix.parquet")
+
+        # Database is passed via environment variable from Rust
+        db_file = os.environ.get("ATOMGG_DB_FILE")
+        if not db_file:
+            if getattr(sys, 'frozen', False):
+                db_file = get_resource_path("esports_data.db")
+            else:
+                db_file = os.path.join("..", "src-tauri", "src", "esports_data.db")
 
         self.app = TournamentDraft(
             model_file=model_file,
