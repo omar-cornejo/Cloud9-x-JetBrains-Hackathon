@@ -37,7 +37,8 @@
     ],
     "resources": [
       "../python-ml/dist/ml_server.exe",
-      "src/esports_data.db"
+      "src/esports_data.db",
+      "../public/dragontail-16.2.1/16.2.1/data/en_US/champion.json"
     ]
   }
 }

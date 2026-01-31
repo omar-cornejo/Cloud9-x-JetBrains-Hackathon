@@ -10,7 +10,7 @@ use tauri::Manager;
 mod lcu;
 mod lcu_utils;
 
-const DDRAGON_VERSION: &str = "16.1.1";
+const DDRAGON_VERSION: &str = "16.2.1";
 
 struct MlProcess {
     child: Child,
@@ -170,17 +170,58 @@ struct ChampionData {
     key: String,
 }
 
-#[tauri::command]
-async fn get_all_champions() -> Result<Vec<ChampionShort>, String> {
-    let url = format!("https://ddragon.leagueoflegends.com/cdn/{}/data/en_US/champion.json", DDRAGON_VERSION);
+fn load_local_champion_json(app_handle: Option<&tauri::AppHandle>) -> Result<DDragonResponse, String> {
+    // Production: Check bundled resources
+    if let Some(handle) = app_handle {
+        if let Ok(resource_dir) = handle.path().resource_dir() {
+            let bundled_json = resource_dir
+                .join("_up_")
+                .join("public")
+                .join("dragontail-16.2.1")
+                .join(DDRAGON_VERSION)
+                .join("data")
+                .join("en_US")
+                .join("champion.json");
 
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| e.to_string())?
-        .json::<DDragonResponse>()
-        .await
-        .map_err(|e| e.to_string())?;
+            if bundled_json.exists() {
+                let content = std::fs::read_to_string(&bundled_json)
+                    .map_err(|e| format!("Failed to read bundled champion.json: {}", e))?;
+                return serde_json::from_str(&content)
+                    .map_err(|e| format!("Failed to parse bundled champion.json: {}", e));
+            }
+        }
+    }
 
+    // Dev: Check local folder
+    let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    for _ in 0..8 {
+        let candidate = dir
+            .join("public")
+            .join("dragontail-16.2.1")
+            .join(DDRAGON_VERSION)
+            .join("data")
+            .join("en_US")
+            .join("champion.json");
+
+        if candidate.exists() {
+            let content = std::fs::read_to_string(&candidate)
+                .map_err(|e| format!("Failed to read champion.json: {}", e))?;
+            return serde_json::from_str(&content)
+                .map_err(|e| format!("Failed to parse champion.json: {}", e));
+        }
+
+        if let Some(parent) = dir.parent() {
+            dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    Err("Could not locate champion.json".to_string())
+}
+
+fn load_local_champions(app_handle: Option<&tauri::AppHandle>) -> Result<Vec<ChampionShort>, String> {
+    let response = load_local_champion_json(app_handle)?;
     let champions = response.data
         .into_values()
         .map(|champ| {
@@ -190,12 +231,40 @@ async fn get_all_champions() -> Result<Vec<ChampionShort>, String> {
                 id: champ.id.clone(),
                 numeric_id,
                 icon: get_champion_icon(champ.id.clone()),
-                splash: get_champion_splash(champ.id),
+                splash: get_champion_splash(champ.id.clone()),
             }
         })
         .collect();
-
     Ok(champions)
+}
+
+#[tauri::command]
+async fn get_all_champions(app_handle: tauri::AppHandle) -> Result<Vec<ChampionShort>, String> {
+    let url = format!("https://ddragon.leagueoflegends.com/cdn/{}/data/en_US/champion.json", DDRAGON_VERSION);
+    match reqwest::get(url).await {
+        Ok(resp) => {
+            if let Ok(response) = resp.json::<DDragonResponse>().await {
+                let champions = response.data
+                    .into_values()
+                    .map(|champ| {
+                        let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
+                        ChampionShort {
+                            name: champ.name.clone(),
+                            id: champ.id.clone(),
+                            numeric_id,
+                            icon: get_champion_icon(champ.id.clone()),
+                            splash: get_champion_splash(champ.id),
+                        }
+                    })
+                    .collect();
+                return Ok(champions);
+            }
+        }
+        Err(_) => {}
+    }
+
+    // Fallback to bundled champion.json
+    load_local_champions(Some(&app_handle))
 }
 
 #[tauri::command]
