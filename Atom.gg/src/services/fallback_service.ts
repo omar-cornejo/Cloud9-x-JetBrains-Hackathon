@@ -20,7 +20,7 @@ const ROLE_MAP: Record<string, string> = {
 } as const;
 
 let positionIconFallback = false;
-
+let championAssetFallback = false;
 
 /**
  * Cache for champion data to avoid repeated requests
@@ -37,6 +37,14 @@ export async function getAllChampions(): Promise<Champion[]> {
 
     try {
         const result = await invoke<Champion[]>("get_all_champions");
+        // Update URLs if we detected that we need fallback for assets, 
+        // even if the backend managed to get the JSON.
+        if (championAssetFallback) {
+            result.forEach(c => {
+                c.icon = getChampionIcon(c.id);
+                c.splash = getChampionSplash(c.id);
+            });
+        }
         championCache = result;
         return result;
     } catch (error) {
@@ -77,8 +85,8 @@ function transformChampionData(data: DDragonResponse): Champion[] {
         name: champ.name,
         id: champ.id,
         numeric_id: parseInt(champ.key, 10) || 0,
-        icon: `${FALLBACK_BASE_PATH}/${DDRAGON_VERSION}/img/champion/${champ.id}.png`,
-        splash: `${FALLBACK_BASE_PATH}/img/champion/splash/${champ.id}_0.jpg`,
+        icon: getChampionIcon(champ.id),
+        splash: getChampionSplash(champ.id),
     }));
 }
 
@@ -115,6 +123,26 @@ export function getRoleIconSync(role: string): string {
     return getRoleIcon(role);
 }
 
+/**
+ * Returns champion icon with automatic fallback
+ */
+export function getChampionIcon(id: string): string {
+    if (championAssetFallback) {
+        return `${FALLBACK_BASE_PATH}/${DDRAGON_VERSION}/img/champion/${id}.png`;
+    }
+    return `https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/${id}.png`;
+}
+
+/**
+ * Returns champion splash with automatic fallback
+ */
+export function getChampionSplash(id: string): string {
+    if (championAssetFallback) {
+        return `${FALLBACK_BASE_PATH}/img/champion/splash/${id}_0.jpg`;
+    }
+    return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${id}_0.jpg`;
+}
+
 export async function initializeIconSource(): Promise<void> {
     try {
         const testUrl = getRoleIcon("TOP");
@@ -122,6 +150,14 @@ export async function initializeIconSource(): Promise<void> {
         positionIconFallback = !response.ok;
     } catch (error) {
         positionIconFallback = true;
+    }
+
+    try {
+        const testUrl = `https://ddragon.leagueoflegends.com/cdn/${DDRAGON_VERSION}/img/champion/Aatrox.png`;
+        const response = await fetch(testUrl, { method: 'HEAD' });
+        championAssetFallback = !response.ok;
+    } catch (error) {
+        championAssetFallback = true;
     }
 }
 

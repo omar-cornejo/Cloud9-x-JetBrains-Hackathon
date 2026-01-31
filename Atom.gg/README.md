@@ -7,6 +7,7 @@ A Tauri + React + TypeScript application for League of Legends draft analysis an
 - [Node.js](https://nodejs.org/) (v18 or higher)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Python 3.10+](https://www.python.org/downloads/) (for ML features)
+- [Visual Studio Build Tools](https://visualstudio.microsoft.com/es/visual-cpp-build-tools/) (for Tauri Windows build)
 
 ## Quick Start
 

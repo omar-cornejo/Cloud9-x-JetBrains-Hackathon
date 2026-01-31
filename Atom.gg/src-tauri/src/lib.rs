@@ -11,7 +11,7 @@ use tauri::Manager;
 mod lcu;
 mod lcu_utils;
 
-const DDRAGON_VERSION: &str = "16.1.1";
+const DDRAGON_VERSION: &str = "16.2.1";
 
 struct MlProcess {
     child: Child,
@@ -109,6 +109,53 @@ fn find_db_path(python_ml_dir: &Path) -> PathBuf {
         .join("esports_data.db")
 }
 
+fn find_public_dir() -> Result<PathBuf, String> {
+    let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    for _ in 0..8 {
+        let candidate = dir.join("public").join("dragontail-16.2.1");
+        if candidate.exists() {
+            return Ok(dir.join("public"));
+        }
+        if let Some(parent) = dir.parent() {
+            dir = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    Err("Could not locate public/dragontail-16.2.1 directory".to_string())
+}
+
+fn load_local_champion_json() -> Result<DDragonResponse, String> {
+    let public_dir = find_public_dir()?;
+    let path = public_dir
+        .join("dragontail-16.2.1")
+        .join(DDRAGON_VERSION)
+        .join("data")
+        .join("en_US")
+        .join("champion.json");
+    
+    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read local champion.json: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse local champion.json: {}", e))
+}
+
+fn load_local_champions() -> Result<Vec<ChampionShort>, String> {
+    let response = load_local_champion_json()?;
+    let champions = response.data
+        .into_values()
+        .map(|champ| {
+            let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
+            ChampionShort {
+                name: champ.name.clone(),
+                id: champ.id.clone(),
+                numeric_id,
+                icon: format!("/dragontail-16.2.1/{}/img/champion/{}.png", DDRAGON_VERSION, champ.id),
+                splash: format!("/dragontail-16.2.1/img/champion/splash/{}_0.jpg", champ.id),
+            }
+        })
+        .collect();
+    Ok(champions)
+}
+
 fn ml_ensure_started(state: &tauri::State<MlState>) -> Result<(), String> {
     let mut guard = state.process.lock().map_err(|_| "ML state poisoned".to_string())?;
     if guard.is_some() {
@@ -165,38 +212,40 @@ struct ChampionData {
 async fn get_all_champions() -> Result<Vec<ChampionShort>, String> {
     let url = format!("https://ddragon.leagueoflegends.com/cdn/{}/data/en_US/champion.json", DDRAGON_VERSION);
 
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| e.to_string())?
-        .json::<DDragonResponse>()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let champions = response.data
-        .into_values()
-        .map(|champ| {
-            let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
-            ChampionShort {
-                name: champ.name.clone(),
-                id: champ.id.clone(),
-                numeric_id,
-                icon: get_champion_icon(champ.id.clone()),
-                splash: get_champion_splash(champ.id),
+    match reqwest::get(url).await {
+        Ok(resp) => {
+            if let Ok(response) = resp.json::<DDragonResponse>().await {
+                let champions = response.data
+                    .into_values()
+                    .map(|champ| {
+                        let numeric_id = champ.key.parse::<i32>().unwrap_or(0);
+                        ChampionShort {
+                            name: champ.name.clone(),
+                            id: champ.id.clone(),
+                            numeric_id,
+                            icon: get_champion_icon(champ.id.clone()),
+                            splash: get_champion_splash(champ.id),
+                        }
+                    })
+                    .collect();
+                return Ok(champions);
             }
-        })
-        .collect();
+        }
+        Err(_) => {}
+    }
 
-    Ok(champions)
+    // Fallback if network fails or JSON parsing fails
+    load_local_champions()
 }
 
 #[tauri::command]
 fn get_champion_icon(id: String) -> String {
-    format!("https://cdn.communitydragon.org/latest/champion/{}/square", id)
+    format!("https://ddragon.leagueoflegends.com/cdn/{}/img/champion/{}.png", DDRAGON_VERSION, id)
 }
 
 #[tauri::command]
 fn get_champion_splash(id: String) -> String {
-    format!("https://cdn.communitydragon.org/latest/champion/{}/splash-art", id)
+    format!("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/{}_0.jpg", id)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -458,7 +507,7 @@ mod tests {
 
         assert_eq!(aatrox.name, "Aatrox");
         assert_eq!(aatrox.id, "Aatrox");
-        assert_eq!(aatrox.icon, "https://ddragon.leagueoflegends.com/cdn/16.1.1/img/champion/Aatrox.png");
+        assert_eq!(aatrox.icon, format!("https://ddragon.leagueoflegends.com/cdn/{}/img/champion/Aatrox.png", DDRAGON_VERSION));
         assert_eq!(aatrox.splash, "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg");
     }
 }
