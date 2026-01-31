@@ -7,26 +7,16 @@ import { BanSlot } from "./BanSlot";
 import { PickSlot } from "./PickSlot";
 import { ChampionCard } from "./ChampionCard";
 import { NoActiveDraft } from "./NoActiveDraft";
+import { getAllChampions, getRoleIconSync } from "../services/fallback_service.ts";
 import "../pages/drafter.css";
 
 const ALL_ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 const UI_ROLES: MlRole[] = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 
-function roleIconUrl(role: MlRole): string {
-  const lane =
-    role === "TOP" ? "top" :
-    role === "JUNGLE" ? "jungle" :
-    role === "MIDDLE" ? "middle" :
-    role === "BOTTOM" ? "bottom" :
-    role === "UTILITY" ? "utility" :
-    "fill";
-  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-${lane}.png`;
-}
-
 function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
   return (
     <img
-      src={roleIconUrl(role)}
+      src={getRoleIconSync(role)}
       alt={role}
       className={`w-4 h-4 rounded ${active ? "opacity-100" : "opacity-70"}`}
     />
@@ -264,7 +254,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }, [champions, searchTerm]);
 
   useEffect(() => {
-    invoke<Champion[]>("get_all_champions")
+    getAllChampions()
         .then(setChampions)
         .catch((err) => console.error("Failed to fetch champions:", err));
   }, []);

@@ -366,9 +366,38 @@ class TournamentDraft:
         except Exception:
             if not self.quiet:
                 print("API Error. Using local dictionary.")
-            self.name_to_id = {}
-            self.id_to_name = {}
-            self.id_to_display_name = {}
+
+            # Fallback to local champion.json (same as frontend)
+            try:
+                dd_version = "16.2.1"
+                # Path relative to python-ml directory
+                local_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "..",
+                    "public",
+                    f"dragontail-{dd_version}",
+                    dd_version,
+                    "data",
+                    "en_US",
+                    "champion.json",
+                )
+
+                if os.path.exists(local_path):
+                    with open(local_path, "r", encoding="utf-8") as f:
+                        r = json.load(f)
+                    self.name_to_id = {k.lower(): int(vv["key"]) for k, vv in r["data"].items()}
+                    self.id_to_name = {int(vv["key"]): vv["id"] for k, vv in r["data"].items()}
+                    self.id_to_display_name = {int(vv["key"]): vv["name"] for k, vv in r["data"].items()}
+                    if not self.quiet:
+                        print(f"   Loaded local fallback: v{dd_version}")
+                else:
+                    self.name_to_id = {}
+                    self.id_to_name = {}
+                    self.id_to_display_name = {}
+            except Exception:
+                self.name_to_id = {}
+                self.id_to_name = {}
+                self.id_to_display_name = {}
 
     def _prepare_role_solver(self):
         rs = self.df.group_by(["champ_id", "position"]).agg(pl.col("games_played").sum())

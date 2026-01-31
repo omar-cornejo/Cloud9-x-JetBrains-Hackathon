@@ -8,19 +8,13 @@ import { PickSlot } from "../components/PickSlot";
 import { ChampionCard } from "../components/ChampionCard";
 import { TimerDisplay } from "../components/TimerDisplay";
 import "./drafter.css";
+import {getAllChampions, getRoleIconSync} from "../services/fallback_service.ts";
 
 const ALL_ROLES: MlRole[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
 const UI_ROLES: MlRole[] = ["ALL", ...ALL_ROLES];
 
 function roleIconUrl(role: MlRole): string {
-  const lane =
-    role === "TOP" ? "top" :
-    role === "JUNGLE" ? "jungle" :
-    role === "MIDDLE" ? "middle" :
-    role === "BOTTOM" ? "bottom" :
-    role === "UTILITY" ? "utility" :
-    "fill";
-  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-clash/global/default/assets/images/position-selector/positions/icon-position-${lane}.png`;
+  return getRoleIconSync(role);
 }
 
 function RoleIcon({ role, active }: { role: MlRole; active: boolean }) {
@@ -212,13 +206,13 @@ function Drafter({ config, onBack }: DrafterProps) {
   const teamHighlightShadow = currentTeam === "blue" ? "rgba(0, 209, 255, 0.25)" : currentTeam === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
 
   useEffect(() => {
-    invoke<Champion[]>("get_all_champions")
-      .then((data) => {
-        setChampions(data);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch champions:", err);
-      });
+    getAllChampions()
+        .then((data) => {
+          setChampions(data);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch champions:", err);
+        });
 
     // Start ML subprocess and configure series/teams.
     invoke("ml_init", { config })
