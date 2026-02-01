@@ -1228,4 +1228,42 @@ Again, since it works and we currently don't have any kind of performance issues
 \\
 While this is OK now, in the future we could store some of the session information, since at a certain point it doesn't change much, and re-use it.
 
+\newpage
+\part{Our Junie usage}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{Atom.gg: Our Junie Usage}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\thispagestyle{empty}
+\vspace*{1cm}
+\begin{center}
+    \LARGE
+    Our Junie usage
+    
+    \vfill
+    
+    \begin{minipage}{0.8\textwidth}
+        \normalsize
+        \noindent Junie, JetBrains' AI coding agent, played a key role in our development process. We integrated it directly into IntelliJ IDEA and used it as our main assistant throughout the project, particularly when working with Rust, a language none of us had prior experience with.
+    \end{minipage}
+    
+    \vspace{2cm}
+\end{center}
+\newpage
+
+\section{Building the app with Junie}
+
+\subsection{Rust server}
+None of our team members had experience with Rust before this project. We decided to use it for the client-side integration due to its performance characteristics, but this meant we had to learn the language on the fly.
+\\
+Junie was key  in this process. We used it as an agent inside IntelliJ IDEA, letting it handle a big part of the Rust boilerplate and guiding us through concepts like ownership, borrowing, and async patterns as we went. Tasks like setting up the LCU authentication, handling HTTP requests with \texttt{reqwest}, and structuring the project were all areas where Junie helped us move fast without getting stuck on language-specific issues that would have slowed us down considerably.
+\\
+Overall, it allowed us to focus on the logic and architecture of the client rather than spending hours figuring out Rust syntax and conventions.
+\subsection{React with typescript frontend}
+With the frontend of Atom.gg we had a similar experience. Some of the team members had experience with react, but others didn't. Junie allowed us to create solid and reusable components (suprisingly well) which we shared across teammates and used in multiple parts of the app. Junie knew when to separate a big page into smaller components and put all of them together, which is something other AI agents normally don't do.
+\\
+\subsection{Creating the executable}
+To create the app executable installer we needed Junie to tell us what resources we weren't bundling correctly. For example one issue that we had was that we didn't reference correctly our database with esports data, which translated to worse predictions when executing the app outside of the local enviorment. Junie fixed some of these directory problems and made the transition to having functions "production" ready a lot easier.
+
 \end{document}
