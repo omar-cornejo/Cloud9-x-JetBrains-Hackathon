@@ -90,20 +90,22 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
     let activeAction = null;
     let isMyTurn = false;
+    let myAction = null;
 
     for (const group of actions) {
       if (!Array.isArray(group)) continue;
       for (const action of group) {
         if (action.isInProgress && !action.completed) {
-          activeAction = action;
+          if (!activeAction) activeAction = action;
           if (action.actorCellId === localCellId) {
             isMyTurn = true;
+            myAction = action;
           }
-          break;
         }
       }
-      if (activeAction) break;
     }
+
+    if (myAction) activeAction = myAction;
 
     //time left
     let timeLeft = 0;
@@ -179,6 +181,20 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     return { myTeamBans, theirTeamBans, cellIdToBan };
   }, [session]);
 
+  const completedPickCellIds = useMemo(() => {
+    if (!session) return new Set<number>();
+    const set = new Set<number>();
+    for (const group of session.actions || []) {
+      if (!Array.isArray(group)) continue;
+      for (const a of group) {
+        if (a.type === "pick" && a.completed) {
+          set.add(a.actorCellId);
+        }
+      }
+    }
+    return set;
+  }, [session]);
+
   const unavailableChampionIds = useMemo(() => {
     if (!session) return new Set<number>();
 
@@ -188,18 +204,22 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     bansFromActions.myTeamBans.forEach(id => unavailable.add(id));
     bansFromActions.theirTeamBans.forEach(id => unavailable.add(id));
 
-    // Add all locked-in picks
+    // Add all locked-in picks (and teammate hovers)
     const myTeam = session.myTeam || [];
     const theirTeam = session.theirTeam || [];
 
     [...myTeam, ...theirTeam].forEach((player: any) => {
       if (player.championId > 0) {
+        // If it's the local player, only add if it's locked (completed)
+        if (player.cellId === session.localPlayerCellId && !completedPickCellIds.has(player.cellId)) {
+          return;
+        }
         unavailable.add(player.championId);
       }
     });
 
     return unavailable;
-  }, [session, bansFromActions]);
+  }, [session, bansFromActions, completedPickCellIds]);
 
   const lockedChampionNames = useMemo(() => {
     if (!session) return new Set<string>();
@@ -217,11 +237,17 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     const myTeam = session.myTeam || [];
     const theirTeam = session.theirTeam || [];
     [...myTeam, ...theirTeam].forEach((player: any) => {
-      if (player?.championId > 0) addChampionId(player.championId);
+      if (player?.championId > 0) {
+        // If it's the local player, only add if it's locked (completed)
+        if (player.cellId === session.localPlayerCellId && !completedPickCellIds.has(player.cellId)) {
+          return;
+        }
+        addChampionId(player.championId);
+      }
     });
 
     return names;
-  }, [session, bansFromActions, championsMap]);
+  }, [session, bansFromActions, championsMap, completedPickCellIds]);
 
   const teamHighlightColor = currentAction.team === "blue" ? "var(--accent-blue)" : currentAction.team === "red" ? "var(--accent-red)" : "var(--brand-primary)";
   const teamHighlightShadow = currentAction.team === "blue" ? "rgba(0, 209, 255, 0.25)" : currentAction.team === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
@@ -261,26 +287,34 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   // Initialize ML for live (client) draft recommendations.
   useEffect(() => {
-    const config = {
-      team1: "Client",
-      team2: "Enemy",
-      isTeam1Blue: true,
-      mode: "SOLOQ",
-      numGames: 1,
-    };
+    const initMl = async () => {
+      const config = {
+        team1: "Client",
+        team2: "Enemy",
+        isTeam1Blue: true,
+        mode: "SOLOQ",
+        numGames: 1,
+      };
 
-    invoke("ml_init", { config })
-      .then(() => {
+      try {
+        setMlReady(false);
+        setMlMyPickSuggest(null);
+        setMlBanSuggest(null);
+        // Ensure state is cleared before starting a new session
+        lastSyncedStateRef.current = "";
+        
+        await invoke("ml_init", { config });
         setMlReady(true);
         setMlError(null);
-        lastSyncedStateRef.current = "";
         setMlSyncTick((t) => t + 1);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("Failed to init ML:", err);
         setMlReady(false);
         setMlError("Failed to init ML process");
-      });
+      }
+    };
+
+    initMl();
   }, []);
 
   useEffect(() => {
@@ -293,18 +327,57 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   //session polling interval
   useEffect(() => {
+    let lastClientChampionId = 0;
+
     const interval = setInterval(async () => {
       try {
-        const data = await invoke("get_champ_select_session");
+        const data = await invoke("get_champ_select_session") as any;
         setSession(data);
         setError(null);
+
+        // Synchronize Atom state with Client state
+        const localCellId = data.localPlayerCellId;
+        let clientChampionId = 0;
+
+        // Check for my active action (hovered ban or pick)
+        for (const group of data.actions || []) {
+          for (const action of group) {
+            if (action.actorCellId === localCellId && action.isInProgress && !action.completed) {
+              if (action.championId > 0) {
+                clientChampionId = action.championId;
+              }
+              break;
+            }
+          }
+          if (clientChampionId > 0) break;
+        }
+
+        // If no active hover, check myTeam (locked picks or pick intents)
+        if (clientChampionId === 0) {
+          const myPlayer = (data.myTeam || []).find((p: any) => p.cellId === localCellId);
+          if (myPlayer) {
+            clientChampionId = myPlayer.championId || myPlayer.championPickIntent;
+          }
+        }
+          
+        if (clientChampionId !== lastClientChampionId) {
+          lastClientChampionId = clientChampionId;
+          if (clientChampionId > 0) {
+            const clientChamp = championsMap.get(clientChampionId);
+            if (clientChamp) {
+              setStagedChampion(clientChamp);
+            }
+          } else {
+            setStagedChampion(null);
+          }
+        }
       } catch (err) {
         setError("Not in champion select or LCU disconnected");
       }
     }, 500);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [championsMap]);
 
   const myTeam = session?.myTeam || [];
   const theirTeam = session?.theirTeam || [];
@@ -312,7 +385,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const getChamp = (id: number) => championsMap.get(id) || null;
 
   const canShowRecommendations =
-    currentAction.isMyTurn &&
     (currentAction.type === "pick" || currentAction.type === "ban") &&
     currentAction.phase !== "PLANNING" &&
     currentAction.phase !== "FINALIZATION";
@@ -381,9 +453,17 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     const seenRed = new Set<string>();
     const seenBans = new Set<string>();
 
+    const localCellId = session.localPlayerCellId;
+
     for (const p of myTeam) {
-      const champId = Number(p?.championId ?? 0);
+      const champId = Number(p?.championId ?? 0) || Number(p?.championPickIntent ?? 0);
       if (!champId || champId <= 0) continue;
+
+      // EXCLUSION: If it's the local player, only include if it's locked (completed)
+      if (p.cellId === localCellId && !completedPickCellIds.has(p.cellId)) {
+        continue;
+      }
+
       const champ = championsMap.get(champId);
       const key = champ?.id;
       if (!key || key === "none") continue;
@@ -393,8 +473,14 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     }
 
     for (const p of theirTeam) {
-      const champId = Number(p?.championId ?? 0);
+      const champId = Number(p?.championId ?? 0) || Number(p?.championPickIntent ?? 0);
       if (!champId || champId <= 0) continue;
+
+      // Enemy side (usually no local player here, but for safety)
+      if (p.cellId === localCellId && !completedPickCellIds.has(p.cellId)) {
+        continue;
+      }
+
       const champ = championsMap.get(champId);
       const key = champ?.id;
       if (!key || key === "none") continue;
@@ -406,9 +492,15 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     for (const group of actions) {
       if (!Array.isArray(group)) continue;
       for (const a of group) {
-        if (!a || a.type !== "ban" || !a.completed) continue;
+        if (!a || a.type !== "ban") continue;
         const champId = Number(a?.championId ?? 0);
         if (!champId || champId <= 0) continue;
+
+        // EXCLUSION: If it's the local player's ban, only include if it's locked (completed)
+        if (a.actorCellId === localCellId && !a.completed) {
+          continue;
+        }
+
         const champ = championsMap.get(champId);
         const key = champ?.id;
         if (!key || key === "none") continue;
@@ -428,9 +520,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         console.error("Failed to sync ML snapshot:", err);
         setMlError("Failed to sync champ-select state to ML");
       });
-  }, [mlReady, session, championsMap]);
+  }, [mlReady, session, championsMap, completedPickCellIds]);
 
-  // Only fetch/display recs when it's your pick turn.
+  // Fetch/display recs during pick/ban phases.
   useEffect(() => {
     if (!canShowRecommendations) return;
     refreshRecommendations();
@@ -482,6 +574,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       return;
     }
 
+    // Immediately update local state for responsiveness
     setStagedChampion(champion);
 
     try {
