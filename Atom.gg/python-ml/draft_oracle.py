@@ -174,7 +174,7 @@ class TournamentDraft:
         """
 
         feature_names = list(self.model.feature_names or [])
-        if not feature_names:
+        if not feature_names or (not self.blue_picks and not self.red_picks):
             return {"blue": 0.5, "red": 0.5}
 
         roles = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
@@ -193,6 +193,7 @@ class TournamentDraft:
             "stat_heal",
             "stat_hard_cc",
             "stat_vision_score",
+            "stat_reliability_index",
             "z_style_roaming_tendency",
             "z_style_lane_dominance",
             "z_style_gank_heaviness",
@@ -222,12 +223,12 @@ class TournamentDraft:
                 set_if_present(f"blue_{r}_{col}", blue_slots[r].get(col, 0.0))
                 set_if_present(f"red_{r}_{col}", red_slots[r].get(col, 0.0))
 
-        # Team-level "__" aggregates (mean across roles)
+        # Team-level "__" aggregates (sum across roles, matching MachineLearning2.ipynb logic)
         for col in slot_cols:
-            blue_mean = float(np.mean([blue_slots[r].get(col, 0.0) for r in roles]))
-            red_mean = float(np.mean([red_slots[r].get(col, 0.0) for r in roles]))
-            set_if_present(f"blue__{col}", blue_mean)
-            set_if_present(f"red__{col}", red_mean)
+            blue_sum = float(np.sum([blue_slots[r].get(col, 0.0) for r in roles]))
+            red_sum = float(np.sum([red_slots[r].get(col, 0.0) for r in roles]))
+            set_if_present(f"blue__{col}", blue_sum)
+            set_if_present(f"red__{col}", red_sum)
 
         # Team totals/ratios derived from per-slot stats.
         # We compute totals across the 5 roles (missing roles filled with means).
@@ -251,54 +252,69 @@ class TournamentDraft:
 
         set_if_present(
             "blue_magic_dmg_ratio",
-            blue_magic / max(1e-9, (blue_magic + blue_phys + blue_true)),
+            blue_magic / (blue_magic + blue_phys + blue_true + 1.0),
         )
         set_if_present(
             "red_magic_dmg_ratio",
-            red_magic / max(1e-9, (red_magic + red_phys + red_true)),
+            red_magic / (red_magic + red_phys + red_true + 1.0),
         )
 
-        # Tankiness/sustain/cc proxies
-        blue_tank = sum_side("stat_dmg_taken", blue_slots) + sum_side("stat_mitigated", blue_slots)
-        red_tank = sum_side("stat_dmg_taken", red_slots) + sum_side("stat_mitigated", red_slots)
+        # Tankiness/sustain/cc proxies (Aligned with MachineLearning2.ipynb)
+        # NOTE: MachineLearning2 uses ONLY stat_mitigated for total_tankiness.
+        blue_tank = sum_side("stat_mitigated", blue_slots)
+        red_tank = sum_side("stat_mitigated", red_slots)
+        blue_sustain = sum_side("stat_heal", blue_slots)
+        red_sustain = sum_side("stat_heal", red_slots)
+
         set_if_present("blue_total_tankiness", blue_tank)
         set_if_present("red_total_tankiness", red_tank)
-        set_if_present("blue_total_sustain", sum_side("stat_heal", blue_slots))
-        set_if_present("red_total_sustain", sum_side("stat_heal", red_slots))
+        set_if_present("blue_total_sustain", blue_sustain)
+        set_if_present("red_total_sustain", red_sustain)
         set_if_present("blue_total_cc", sum_side("stat_hard_cc", blue_slots))
         set_if_present("red_total_cc", sum_side("stat_hard_cc", red_slots))
 
-        # Strategy proxies (best-effort)
-        set_if_present(
-            "blue_strat_gank_compatibility",
-            float(np.mean([blue_slots[r].get("z_style_gank_heaviness", 0.0) for r in roles])),
-        )
-        set_if_present(
-            "red_strat_gank_compatibility",
-            float(np.mean([red_slots[r].get("z_style_gank_heaviness", 0.0) for r in roles])),
-        )
-        set_if_present(
-            "blue_strat_resource_friction",
-            float(np.std([blue_slots[r].get("z_style_gold_hunger", 0.0) for r in roles])),
-        )
-        set_if_present(
-            "red_strat_resource_friction",
-            float(np.std([red_slots[r].get("z_style_gold_hunger", 0.0) for r in roles])),
-        )
-        set_if_present(
-            "blue_strat_invade_safety",
-            float(np.mean([blue_slots[r].get("z_style_invade_pressure", 0.0) for r in roles])),
-        )
-        set_if_present(
-            "red_strat_invade_safety",
-            float(np.mean([red_slots[r].get("z_style_invade_pressure", 0.0) for r in roles])),
-        )
+        # Shred & Anti-Sustain Burst (New features V12)
+        set_if_present("blue_shred_efficiency", (blue_magic + blue_true) / (red_tank + 1.0))
+        set_if_present("red_shred_efficiency", (red_magic + red_true) / (blue_tank + 1.0))
+        set_if_present("blue_anti_sustain_burst", (blue_phys + blue_magic) / (red_sustain + 1000.0))
+        set_if_present("red_anti_sustain_burst", (red_phys + red_magic) / (blue_sustain + 1000.0))
 
-        # Team volatility (proxy)
+        # Strategy features (Ported from MachineLearning2.ipynb V12 enrich_behavioral_strategy)
+        def compute_strat(side_slots: Dict[str, Dict[str, float]]) -> Dict[str, float]:
+            jg_aggro = side_slots["JUNGLE"].get("z_style_gank_heaviness", 0.0)
+            lanes_aggro = (
+                side_slots["TOP"].get("z_style_lane_dominance", 0.0) +
+                side_slots["MIDDLE"].get("z_style_lane_dominance", 0.0) +
+                side_slots["BOTTOM"].get("z_style_lane_dominance", 0.0)
+            ) / 3.0
+
+            gold_hunger_sum = sum(side_slots[r].get("z_style_gold_hunger", 0.0) for r in roles)
+
+            invade_potential = side_slots["JUNGLE"].get("z_style_invade_pressure", 0.0)
+            backup_potential = (
+                side_slots["TOP"].get("z_style_roaming_tendency", 0.0) +
+                side_slots["MIDDLE"].get("z_style_roaming_tendency", 0.0)
+            )
+
+            return {
+                "gank_compatibility": float(jg_aggro * lanes_aggro),
+                "resource_friction": float(gold_hunger_sum),
+                "invade_safety": float(invade_potential * backup_potential)
+            }
+
+        blue_strat = compute_strat(blue_slots)
+        red_strat = compute_strat(red_slots)
+
+        set_if_present("blue_strat_gank_compatibility", blue_strat["gank_compatibility"])
+        set_if_present("red_strat_gank_compatibility", red_strat["gank_compatibility"])
+        set_if_present("blue_strat_resource_friction", blue_strat["resource_friction"])
+        set_if_present("red_strat_resource_friction", red_strat["resource_friction"])
+        set_if_present("blue_strat_invade_safety", blue_strat["invade_safety"])
+        set_if_present("red_strat_invade_safety", red_strat["invade_safety"])
+
+        # Team volatility (diff of sum of var_gold_volatility across roles)
         def team_vol(side_slots: Dict[str, Dict[str, float]]) -> float:
-            cols = ["var_gold_volatility", "var_damage_volatility", "var_lane_stability"]
-            per_role = [float(sum(side_slots[r].get(c, 0.0) for c in cols)) for r in roles]
-            return float(np.mean(per_role))
+            return float(sum(side_slots[r].get("var_gold_volatility", 0.0) for r in roles))
 
         set_if_present("diff_team_volatility", team_vol(blue_slots) - team_vol(red_slots))
 

@@ -335,9 +335,8 @@ function Drafter({ config, onBack }: DrafterProps) {
   const hasMoreGames = gameNumber < config.numGames;
 
   const handleSwap = useCallback((team: "blue" | "red", index: number) => {
-    // Swapping is now allowed even during the draft as long as both slots have champions
-    // (though in practice it's most useful when many champions are picked)
-    
+    if (!isDraftComplete) return;
+
     if (swapSource) {
       if (swapSource.team === team) {
         if (swapSource.index !== index) {
@@ -619,7 +618,7 @@ function Drafter({ config, onBack }: DrafterProps) {
                 playerName={getPlayerName("blue", i)}
                 isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
                 isLowTime={isLowTime && !isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "blue" && DRAFT_SEQUENCE[currentTurn].type === "pick"}
-                onClick={() => handleSwap("blue", i)}
+                onClick={isDraftComplete && !isFinalized ? () => handleSwap("blue", i) : undefined}
                 isSwapSource={swapSource?.team === "blue" && swapSource.index === i}
                 animationDuration={blinkDuration}
               />
@@ -815,7 +814,7 @@ function Drafter({ config, onBack }: DrafterProps) {
               playerName={getPlayerName("red", i)}
               isActive={!isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "pick" && DRAFT_SEQUENCE[currentTurn].index === i}
               isLowTime={isLowTime && !isDraftComplete && DRAFT_SEQUENCE[currentTurn].team === "red" && DRAFT_SEQUENCE[currentTurn].type === "pick"}
-              onClick={() => handleSwap("red", i)}
+              onClick={isDraftComplete && !isFinalized ? () => handleSwap("red", i) : undefined}
               isSwapSource={swapSource?.team === "red" && swapSource.index === i}
               animationDuration={blinkDuration}
             />
@@ -827,7 +826,7 @@ function Drafter({ config, onBack }: DrafterProps) {
                 onClick={() => setIsFinalized(true)}
                 className="w-full group relative bg-[var(--brand-primary)] hover:brightness-110 text-[var(--bg-color)] py-4 font-black uppercase tracking-[0.2em] rounded-xl transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
               >
-                <span>Finalize</span>
+                <span>Finish Draft</span>
               </button>
             </div>
           )}
