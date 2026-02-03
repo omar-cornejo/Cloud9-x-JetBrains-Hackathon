@@ -52,6 +52,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   const [selectedRole, setSelectedRole] = useState<MlRole>("ALL");
 
   const lastSyncedStateRef = useRef<string>("");
+  const lastManualInteractionRef = useRef<number>(0);
+  const lastClientChampionIdRef = useRef<number>(0);
 
   const championsMap = useMemo(() => {
     const map = new Map<number, Champion>();
@@ -120,12 +122,21 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     const isPlanning = phase === "PLANNING" || phase === "FINALIZATION";
 
     if (activeAction) {
+      const actorIsMyTeam = myTeamCellIds.has(activeAction.actorCellId);
+      // In LCU, team 1 is blue, team 2 is red.
+      const localPlayer = myTeam.find((p: any) => p.cellId === localCellId);
+      const isLocalPlayerBlue = localPlayer?.team === 1;
+      
+      const actorTeam = actorIsMyTeam 
+        ? (isLocalPlayerBlue ? "blue" : "red")
+        : (isLocalPlayerBlue ? "red" : "blue");
+
       return {
         type: isPlanning ? null : activeAction.type,
         isMyTurn,
         timeLeft,
         phase,
-        team: myTeamCellIds.has(activeAction.actorCellId) ? "blue" : "red"
+        team: actorTeam
       };
     }
 
@@ -196,58 +207,34 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
   }, [session]);
 
   const unavailableChampionIds = useMemo(() => {
-    if (!session) return new Set<number>();
+    const ids = new Set<number>();
+    if (!session) return ids;
 
-    const unavailable = new Set<number>();
-
-    // Add all bans
-    bansFromActions.myTeamBans.forEach(id => unavailable.add(id));
-    bansFromActions.theirTeamBans.forEach(id => unavailable.add(id));
-
-    // Add all locked-in picks (and teammate hovers)
-    const myTeam = session.myTeam || [];
-    const theirTeam = session.theirTeam || [];
-
-    [...myTeam, ...theirTeam].forEach((player: any) => {
-      if (player.championId > 0) {
-        // If it's the local player, only add if it's locked (completed)
-        if (player.cellId === session.localPlayerCellId && !completedPickCellIds.has(player.cellId)) {
-          return;
+    for (const group of session.actions || []) {
+      if (!Array.isArray(group)) continue;
+      for (const action of group) {
+        if (action.completed && action.championId > 0) {
+          ids.add(action.championId);
         }
-        unavailable.add(player.championId);
       }
-    });
-
-    return unavailable;
-  }, [session, bansFromActions, completedPickCellIds]);
+    }
+    return ids;
+  }, [session]);
 
   const lockedChampionNames = useMemo(() => {
-    if (!session) return new Set<string>();
-
     const names = new Set<string>();
-    const addChampionId = (id: number) => {
-      if (!id || id <= 0) return;
+    unavailableChampionIds.forEach((id) => {
       const champ = championsMap.get(id);
       if (champ && champ.name !== "none") names.add(champ.name);
-    };
-
-    for (const id of bansFromActions.myTeamBans) addChampionId(id);
-    for (const id of bansFromActions.theirTeamBans) addChampionId(id);
-
-    const myTeam = session.myTeam || [];
-    const theirTeam = session.theirTeam || [];
-    [...myTeam, ...theirTeam].forEach((player: any) => {
-      if (player?.championId > 0) {
-        // If it's the local player, only add if it's locked (completed)
-        if (player.cellId === session.localPlayerCellId && !completedPickCellIds.has(player.cellId)) {
-          return;
-        }
-        addChampionId(player.championId);
-      }
     });
-
     return names;
-  }, [session, bansFromActions, championsMap, completedPickCellIds]);
+  }, [unavailableChampionIds, championsMap]);
+
+  const isLocalPlayerBlue = useMemo(() => {
+    if (!session) return true;
+    const localPlayer = (session.myTeam || []).find((p: any) => p.cellId === session.localPlayerCellId);
+    return localPlayer?.team === 1;
+  }, [session]);
 
   const teamHighlightColor = currentAction.team === "blue" ? "var(--accent-blue)" : currentAction.team === "red" ? "var(--accent-red)" : "var(--brand-primary)";
   const teamHighlightShadow = currentAction.team === "blue" ? "rgba(0, 209, 255, 0.25)" : currentAction.team === "red" ? "rgba(255, 75, 80, 0.25)" : "rgba(0, 255, 148, 0.25)";
@@ -287,11 +274,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   // Initialize ML for live (client) draft recommendations.
   useEffect(() => {
+    if (!session || mlReady) return;
+
     const initMl = async () => {
       const config = {
         team1: "Client",
         team2: "Enemy",
-        isTeam1Blue: true,
+        isTeam1Blue: isLocalPlayerBlue,
         mode: "SOLOQ",
         numGames: 1,
       };
@@ -315,7 +304,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     };
 
     initMl();
-  }, []);
+  }, [session, mlReady, isLocalPlayerBlue]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -327,8 +316,6 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   //session polling interval
   useEffect(() => {
-    let lastClientChampionId = 0;
-
     const interval = setInterval(async () => {
       try {
         const data = await invoke("get_champ_select_session") as any;
@@ -360,8 +347,16 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           }
         }
           
-        if (clientChampionId !== lastClientChampionId) {
-          lastClientChampionId = clientChampionId;
+        if (clientChampionId !== lastClientChampionIdRef.current) {
+          lastClientChampionIdRef.current = clientChampionId;
+
+          // Don't overwrite if the user just clicked something manually in the last 2.5s
+          // to give LCU time to update and Atom polling to see it.
+          const now = Date.now();
+          if (now - lastManualInteractionRef.current < 2500) {
+            return;
+          }
+
           if (clientChampionId > 0) {
             const clientChamp = championsMap.get(clientChampionId);
             if (clientChamp) {
@@ -391,11 +386,13 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
   const suggestContext = useMemo(() => {
     const isBanMode = currentAction.type === "ban";
-    const mySide: "BLUE" | "RED" = "BLUE";
-    const analyzeSide: "BLUE" | "RED" = isBanMode ? "RED" : "BLUE";
+    const mySide = isLocalPlayerBlue ? "BLUE" : "RED";
+    const analyzeSide = isBanMode 
+        ? (isLocalPlayerBlue ? "RED" : "BLUE") 
+        : (isLocalPlayerBlue ? "BLUE" : "RED");
     const label = isBanMode ? "Ban Suggestions" : "Pick Suggestions";
     return { isBanMode, mySide, analyzeSide, label };
-  }, [currentAction.type]);
+  }, [currentAction.type, isLocalPlayerBlue]);
 
   const refreshRecommendations = useCallback(async () => {
     try {
@@ -403,7 +400,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
       if (currentAction.type === "ban") {
         const res = (await invoke("ml_suggest", {
-          targetSide: "RED",
+          targetSide: suggestContext.analyzeSide,
           isBanMode: true,
           roles: ALL_ROLES,
         })) as MlResponse;
@@ -416,7 +413,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
         setMlBanSuggest(res.payload as MlSuggestPayload);
       } else {
         const res = (await invoke("ml_suggest", {
-          targetSide: "BLUE",
+          targetSide: suggestContext.analyzeSide,
           isBanMode: false,
           roles: ALL_ROLES,
         })) as MlResponse;
@@ -431,7 +428,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     } catch (e: any) {
       setMlError(e?.toString?.() ?? "Failed to fetch ML suggestions");
     }
-  }, [currentAction.type]);
+  }, [currentAction.type, suggestContext.analyzeSide]);
 
   // Sync a full snapshot (picks + bans) from champ-select into ML.
   // This is more reliable than only syncing completed actions because the LCU
@@ -467,9 +464,16 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       const champ = championsMap.get(champId);
       const key = champ?.id;
       if (!key || key === "none") continue;
-      if (seenBlue.has(key)) continue;
-      seenBlue.add(key);
-      bluePickKeys.push(key);
+      
+      if (isLocalPlayerBlue) {
+        if (seenBlue.has(key)) continue;
+        seenBlue.add(key);
+        bluePickKeys.push(key);
+      } else {
+        if (seenRed.has(key)) continue;
+        seenRed.add(key);
+        redPickKeys.push(key);
+      }
     }
 
     for (const p of theirTeam) {
@@ -484,9 +488,16 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       const champ = championsMap.get(champId);
       const key = champ?.id;
       if (!key || key === "none") continue;
-      if (seenRed.has(key)) continue;
-      seenRed.add(key);
-      redPickKeys.push(key);
+
+      if (isLocalPlayerBlue) {
+        if (seenRed.has(key)) continue;
+        seenRed.add(key);
+        redPickKeys.push(key);
+      } else {
+        if (seenBlue.has(key)) continue;
+        seenBlue.add(key);
+        bluePickKeys.push(key);
+      }
     }
 
     for (const group of actions) {
@@ -574,6 +585,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       return;
     }
 
+    // Mark last manual interaction to prevent polling overwrite
+    lastManualInteractionRef.current = Date.now();
+
     // Immediately update local state for responsiveness
     setStagedChampion(champion);
 
@@ -592,6 +606,9 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
     if (!currentAction.isMyTurn || !stagedChampion) return;
 
     if (stagedChampion.name === "none") return;
+
+    // Mark last manual interaction to prevent polling overwrite
+    lastManualInteractionRef.current = Date.now();
 
     try {
       if (currentAction.type === "pick") {
@@ -663,9 +680,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
       >
         <div className="flex justify-between items-start mb-4">
           <div className="flex flex-col gap-2">
-            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-blue)] flex items-center gap-2">
-              <span className="px-2 py-0.5 bg-[var(--accent-blue)] text-[var(--bg-color)] rounded text-[9px]">BLUE</span>
-              Blue Side <span className="text-[var(--text-muted)] opacity-50 ml-auto text-[10px]">bans</span>
+            <div className={`team-name text-base font-black uppercase tracking-tighter flex items-center gap-2 ${isLocalPlayerBlue ? "text-[var(--accent-blue)]" : "text-[var(--accent-red)]"}`}>
+              <span className={`px-2 py-0.5 rounded text-[9px] ${isLocalPlayerBlue ? "bg-[var(--accent-blue)] text-[var(--bg-color)]" : "bg-[var(--accent-red)] text-white"}`}>
+                {isLocalPlayerBlue ? "BLUE" : "RED"}
+              </span>
+              {isLocalPlayerBlue ? "Blue Side" : "Red Side"} <span className="text-[var(--text-muted)] opacity-50 ml-auto text-[10px]">bans</span>
             </div>
             <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.myTeamBans.map((id: number, i: number) => (
@@ -748,9 +767,11 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
           </div>
 
           <div className="flex flex-col gap-2 items-end">
-            <div className="team-name text-base font-black uppercase tracking-tighter text-[var(--accent-red)] flex items-center gap-2">
+            <div className={`team-name text-base font-black uppercase tracking-tighter flex items-center gap-2 ${isLocalPlayerBlue ? "text-[var(--accent-red)]" : "text-[var(--accent-blue)]"}`}>
               <span className="text-[var(--text-muted)] opacity-50 mr-auto text-[10px]">bans</span>
-              Red Side <span className="px-2 py-0.5 bg-[var(--accent-red)] text-[var(--bg-color)] rounded text-[9px]">RED</span>
+              {isLocalPlayerBlue ? "Red Side" : "Blue Side"} <span className={`px-2 py-0.5 rounded text-[9px] ${isLocalPlayerBlue ? "bg-[var(--accent-red)] text-white" : "bg-[var(--accent-blue)] text-[var(--bg-color)]"}`}>
+                {isLocalPlayerBlue ? "RED" : "BLUE"}
+              </span>
             </div>
             <div className="ban-slot-container flex gap-1.5">
               {bansFromActions.theirTeamBans.map((id: number, i: number) => (
@@ -937,7 +958,7 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
 
                     {mlError && (
                       <div className="text-[var(--accent-red)] text-[10px] font-black uppercase tracking-widest px-1 animate-pulse">
-                        ⚠️ {mlError}
+                        {mlError}
                       </div>
                     )}
 
@@ -949,12 +970,8 @@ export function LiveChampSelect({ onBack, onHome }: LiveChampSelectProps) {
                               key={`${selectedRole}-${rec.champion}`}
                               className="group flex flex-col items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-color)] rounded-lg p-2 hover:border-[var(--team-accent)] transition-all cursor-pointer hover:bg-[var(--surface-color)] hover:scale-[1.02]"
                               onClick={() => {
-                                if (!champ) return;
                                 setSelectedRec({ rec, champ });
-                                setStagedChampion((prev) => (prev?.name === champ.name ? null : champ));
-                                if (stagedChampion?.name !== champ.name) {
-                                  handleSelectChampion(champ);
-                                }
+                                if (champ) handleSelectChampion(champ);
                               }}
                             >
                               <div className="relative">
